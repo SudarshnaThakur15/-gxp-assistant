@@ -32,3 +32,18 @@ npm run dev:api   # http://localhost:8000  (GET /health/db = end-to-end DB check
 npm run dev:web   # http://localhost:3000
 npm run build     # web production build + API compile check
 ```
+
+## Audit trail
+
+`audit_log` is append-only (UPDATE/DELETE/TRUNCATE are blocked by triggers) and
+hash-chained: each entry stores `sha256(prev_hash:seq:record)`. `GET /audit/verify`
+recomputes every hash and reports the first entry that no longer matches.
+
+```bash
+cd api
+uv run python -m app.audit_cli append --count 5   # sample entries
+uv run python -m app.audit_cli verify             # chain intact: 5 entries
+uv run python -m app.audit_cli tamper 3           # admin bypasses the trigger and edits #3
+uv run python -m app.audit_cli verify             # CHAIN BROKEN at entry #3
+uv run python -m app.audit_cli restore            # put #3 back for the next rehearsal
+```

@@ -21,6 +21,9 @@ __pycache__/
 # local model cache (fastembed downloads)
 .cache/
 
+# tamper demo backup
+.tamper-backup.json
+
 # os / editor
 .DS_Store
 .vscode/

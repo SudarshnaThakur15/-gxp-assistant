@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
 
-import { getDbHealth, settle } from "@/lib/api";
+import { getDbHealth, settle, verifyAudit } from "@/lib/api";
 
 export default function Home() {
   return (
@@ -12,6 +12,9 @@ export default function Home() {
       </div>
       <Suspense fallback={<p className="text-sm text-zinc-500">Checking database…</p>}>
         <DbStatus />
+      </Suspense>
+      <Suspense fallback={<p className="text-sm text-zinc-500">Verifying audit trail…</p>}>
+        <AuditStatus />
       </Suspense>
     </main>
   );
@@ -49,5 +52,24 @@ async function DbStatus() {
         </div>
       ))}
     </dl>
+  );
+}
+
+async function AuditStatus() {
+  await connection();
+  const { data: audit, error } = await settle(verifyAudit());
+  if (!audit) {
+    return <Alert tone="error">API unreachable: {error}</Alert>;
+  }
+
+  return audit.ok ? (
+    <Alert tone="ok">
+      Audit trail intact: {audit.entries} entries, head{" "}
+      <span className="font-mono">{audit.head_hash?.slice(0, 16)}…</span>
+    </Alert>
+  ) : (
+    <Alert tone="error">
+      Audit trail broken at entry #{audit.broken_at}: {audit.reason}
+    </Alert>
   );
 }

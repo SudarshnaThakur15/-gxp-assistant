@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.audit import verify_chain
 from app.config import settings
 from app.db import pool
 
@@ -87,3 +88,27 @@ def personas() -> list[dict]:
         for id_, name, title, role, can_sign, org, clients in rows
     ]
 
+
+@app.get("/audit")
+def audit_entries(limit: int = 20) -> list[dict]:
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT seq, recorded_at, actor, event_type, payload, prev_hash, hash
+              FROM audit_log
+             ORDER BY seq DESC
+             LIMIT %s
+            """,
+            (min(limit, 200),),
+        ).fetchall()
+    return [
+        {"seq": seq, "recorded_at": recorded_at, "actor": actor, "event_type": event_type,
+         "payload": payload, "prev_hash": prev_hash, "hash": hash_}
+        for seq, recorded_at, actor, event_type, payload, prev_hash, hash_ in rows
+    ]
+
+
+@app.get("/audit/verify")
+def audit_verify() -> dict:
+    with pool.connection() as conn:
+        return verify_chain(conn)

@@ -32,6 +32,14 @@ export type Persona = {
   clients: string[];
 };
 
+export type AuditVerification = {
+  ok: boolean;
+  entries: number;
+  broken_at: number | null;
+  reason: string | null;
+  head_hash: string | null;
+};
+
 // Fetch first, render after: keeps JSX out of try/catch.
 export async function settle<T>(promise: Promise<T>): Promise<{ data: T; error: null } | { data: null; error: string }> {
   try {
@@ -43,3 +51,4 @@ export async function settle<T>(promise: Promise<T>): Promise<{ data: T; error: 
 
 export const getDbHealth = () => getJson<DbHealth>("/health/db");
 export const getPersonas = () => getJson<Persona[]>("/personas");
+export const verifyAudit = () => getJson<AuditVerification>("/audit/verify");
