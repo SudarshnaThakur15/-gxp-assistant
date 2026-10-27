@@ -1,0 +1,17 @@
+{
+  "name": "gxp-assistant",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix web run build && npm run build:api",
+    "build:api": "cd api && uv run python -m compileall -q app",
+    "dev:web": "npm --prefix web run dev",
+    "dev:api": "cd api && uv run uvicorn app.main:app --reload --port 8000",
+    "migrate": "cd api && uv run python -m app.migrate",
+    "db:env": "neon env pull --profile sudarshna",
+    "db:deploy": "neon deploy --profile sudarshna"
+  },
+  "dependencies": {
+    "@neon/config": "^1.9.4",
+    "@neon/env": "^1.6.5"
+  }
+}
