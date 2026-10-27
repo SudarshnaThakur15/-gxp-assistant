@@ -5,7 +5,12 @@ from urllib.parse import urlparse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from dataclasses import asdict
+
+from pydantic import BaseModel
+
 from app.audit import verify_chain
+from app.retrieval import retrieve
 from app.config import settings
 from app.db import pool
 
@@ -106,6 +111,17 @@ def audit_entries(limit: int = 20) -> list[dict]:
          "payload": payload, "prev_hash": prev_hash, "hash": hash_}
         for seq, recorded_at, actor, event_type, payload, prev_hash, hash_ in rows
     ]
+
+
+class RetrieveRequest(BaseModel):
+    persona: str
+    question: str
+
+
+@app.post("/retrieve")
+def retrieve_endpoint(req: RetrieveRequest) -> dict:
+    with pool.connection() as conn:
+        return asdict(retrieve(conn, req.persona, req.question))
 
 
 @app.get("/audit/verify")
