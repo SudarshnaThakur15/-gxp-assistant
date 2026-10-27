@@ -10,6 +10,8 @@
 """
 
 import re
+import unicodedata
+from collections import defaultdict
 from dataclasses import dataclass
 from importlib.metadata import version
 
@@ -20,11 +22,19 @@ from docx.text.paragraph import Paragraph
 
 from app.corpus import Source
 
-PARSERS = {
-    "markdown": "markdown-headings/1",
-    "pdf": f"pdfplumber {version('pdfplumber')}/1",
-    "docx": f"python-docx {version('python-docx')}/1",
+PARSERS = {  # bump the /N suffix whenever parsing rules change: it forces re-ingestion
+    "markdown": "markdown-headings/2",
+    "pdf": f"pdfplumber {version('pdfplumber')}/2",
+    "docx": f"python-docx {version('python-docx')}/2",
 }
+
+
+def normalise(text: str) -> str:
+    """One canonical text form, used for chunks, search and (later) exact-quote checks."""
+    text = unicodedata.normalize("NFKC", text)              # ligatures, full-width chars, non-breaking spaces
+    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)            # "manufac-\nturing" -> "manufacturing"
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 NUMBERED = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+(\S.*)$")
 MD_HEADING = re.compile(r"^#{2,3} (?:(\d+(?:\.\d+)*)\.?\s+)?(.+)$")
@@ -49,7 +59,8 @@ class Section:
 def parse(source: Source) -> list[Section]:
     sections = {"markdown": _parse_markdown, "pdf": _parse_pdf, "docx": _parse_docx}[source.format](source)
     for s in sections:
-        s.text = s.text.strip()
+        s.text = normalise(s.text)
+        s.heading = normalise(s.heading)
     return [s for s in sections if s.text]
 
 
@@ -71,6 +82,7 @@ def _parse_markdown(source: Source) -> list[Section]:
 def _parse_docx(source: Source) -> list[Section]:
     doc = Document(source.path)
     sections: list[Section] = []
+    counters: list[int] = []  # for headings numbered automatically by Word (number not in the text)
     for child in doc.element.body.iterchildren():
         if child.tag.endswith("}p"):
             para = Paragraph(child, doc)
@@ -79,13 +91,37 @@ def _parse_docx(source: Source) -> list[Section]:
                 continue
             if para.style is not None and para.style.name.startswith("Heading"):
                 m = NUMBERED.match(text)
-                sections.append(Section(m[1], m[2].strip()) if m else Section(None, text))
+                if m:
+                    sections.append(Section(m[1], m[2].strip()))
+                    counters = list(_number(m[1]))
+                elif _auto_numbered(para):
+                    level = _heading_level(para)
+                    counters = (counters + [0] * level)[:level]
+                    counters[-1] += 1
+                    sections.append(Section(".".join(map(str, counters)), text))
+                else:
+                    sections.append(Section(None, text))
             elif sections:  # the title block before the first heading is metadata, not content
                 sections[-1].text += text + "\n"
         elif child.tag.endswith("}tbl") and sections:
             for row in Table(child, doc).rows:
                 sections[-1].text += " | ".join(cell.text.strip() for cell in row.cells) + "\n"
     return sections
+
+
+def _heading_level(para: Paragraph) -> int:
+    m = re.search(r"(\d+)$", para.style.name)
+    return int(m[1]) if m else 1
+
+
+def _auto_numbered(para: Paragraph) -> bool:
+    """Numbering set on the paragraph or inherited from its style (w:numPr)."""
+    style = para.style
+    while style is not None:
+        if style.element.pPr is not None and style.element.pPr.numPr is not None:
+            return True
+        style = style.base_style
+    return para._p.pPr is not None and para._p.pPr.numPr is not None
 
 
 # --- PDF ----------------------------------------------------------------------
@@ -101,7 +137,13 @@ def _pdf_lines(source: Source) -> list[tuple[int, str]]:
                     line = re.sub(r"^\d{1,3}\s+(?=\S)", "", line)
                 if line and not any(p.search(line) for p in PDF_NOISE):
                     lines.append((page_no, line))
-    return lines
+    # Running headers/footers: identical lines on at least half the pages (min 3).
+    pages = defaultdict(set)
+    for page_no, line in lines:
+        pages[line].add(page_no)
+    n_pages = len({p for p, _ in lines})
+    repeated = {l for l, ps in pages.items() if len(ps) >= max(3, n_pages // 2)}
+    return [(p, l) for p, l in lines if l not in repeated]
 
 
 def _number(text: str) -> tuple[int, ...]:

@@ -57,7 +57,7 @@ uv run python -m app.ingest         # parse → chunk → embed locally (bge-sma
 
 Ingestion re-embeds a document only when its file, parser or embedding model changes; a
 metadata-only change (e.g. a new review date in the DMS) updates the record without re-embedding.
-Every ingested document, metadata change, run summary and rejection is written to the audit trail.
+Every ingested document, metadata change, withdrawal, run summary, rejection and failure is written to the audit trail. Design notes and lessons: `docs/ingestion-lessons.md`.
 
 ## Audit trail
 

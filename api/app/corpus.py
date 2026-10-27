@@ -87,14 +87,17 @@ def load_pdf(meta_path: Path) -> Source:
 
 def load_dms_export(folder: Path) -> list[Source]:
     mapping = yaml.safe_load((folder / "mapping.yaml").read_text())
+    values = {name: {k.casefold(): v for k, v in table.items()} for name, table in mapping["values"].items()}
+    files_dir = (folder / "files").resolve()
     sources = []
-    with (folder / "dms_export.csv").open(newline="") as f:
+    # utf-8-sig: Excel-saved CSVs start with a byte-order mark that would corrupt the first column name
+    with (folder / "dms_export.csv").open(newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             meta, problems = {"tenant": mapping["tenant"]}, []
             for name, column in mapping["fields"].items():
                 raw = (row.get(column) or "").strip()
-                value = mapping["values"].get(name, {}).get(raw, raw) if raw else None
-                if raw and name in mapping["values"] and raw not in mapping["values"][name]:
+                value = values[name].get(raw.casefold(), raw) if raw and name in values else (raw or None)
+                if raw and name in values and raw.casefold() not in values[name]:
                     problems.append(f"{name} value {raw!r} has no mapping")
                 if value and name in ("effective_date", "review_date"):
                     try:
@@ -102,7 +105,11 @@ def load_dms_export(folder: Path) -> list[Source]:
                     except ValueError:
                         problems.append(f"{name} {raw!r} is not a date")
                 meta[name] = value
-            sources.append(Source(folder / "files" / row[mapping["file_column"]], "docx", meta, problems))
+            path = (files_dir / (row.get(mapping["file_column"]) or "")).resolve()
+            if not path.is_relative_to(files_dir) or path == files_dir:  # e.g. "../../secret"
+                problems.append("file name points outside the export folder")
+                path = files_dir / "INVALID"
+            sources.append(Source(path, "docx", meta, problems))
     return sources
 
 
@@ -176,7 +183,20 @@ def check_corpus(accepted: list[Source], errors: list[str]) -> None:
 def load_and_validate() -> tuple[list[Source], list[Source], list[str]]:
     """Return (accepted, rejected, errors). Errors block ingestion; rejections are DMS records that fail closed."""
     accepted, rejected, errors = [], [], []
-    for source in load_sources():
+    sources = load_sources()
+    # Conflicting DMS records (same code+version twice, or two effective versions) are rejected, not guessed.
+    dms = [s for s in sources if s.from_dms]
+    for key, n in Counter(s.key for s in dms).items():
+        if n > 1:
+            for s in dms:
+                if s.key == key:
+                    s.problems.append("duplicate record in DMS export")
+    for code, n in Counter(s.meta.get("code") for s in dms if s.meta.get("status") == "effective").items():
+        if n > 1:
+            for s in dms:
+                if s.meta.get("code") == code and s.meta.get("status") == "effective":
+                    s.problems.append("more than one effective version in DMS export")
+    for source in sources:
         check_source(source)
         if not source.problems:
             accepted.append(source)
