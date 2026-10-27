@@ -1,0 +1,35 @@
+# How this client's DMS export maps onto our document fields.
+# In production this file is configured once per client (Veeva, MasterControl, SharePoint, ...);
+# the documents themselves are ingested unchanged.
+
+tenant: northbridge
+file_column: file_name__v
+
+fields:
+  code: document_number__v
+  title: title__v
+  version: version__v
+  status: status__v
+  doc_type: document_type__v
+  effective_date: effective_date__c
+  review_date: periodic_review_date__c
+  owner: owner__v
+  client: client__c
+  confidentiality: confidentiality__c
+
+values:
+  status:
+    Effective: effective
+    Superseded: superseded
+    Draft: draft
+    Obsolete: withdrawn
+  doc_type:
+    Standard Operating Procedure: sop
+    Policy: policy
+    Specification: specification
+  client:
+    Aldermoor Biologics: client-a
+    Corvane Therapeutics: client-b
+  confidentiality:
+    Internal: internal
+    Client Confidential: client-confidential

@@ -44,9 +44,20 @@ eval/golden.yaml          16 test questions with expected citations, refusals an
 Every Markdown document carries its metadata (code, version, status, client, …) in a YAML
 header. Sources and licences for the public guidelines are in `corpus/SOURCES.md`.
 
+A third source type shows how real client documents arrive: `northbridge/dms-export/` holds
+unmodified Word files plus a `dms_export.csv` (shaped like a Veeva/MasterControl export) and a
+`mapping.yaml` that maps its columns onto our fields. A record with missing metadata (here,
+SOP-WH-090 has no status) is **rejected at ingestion and logged**, never guessed at.
+
 ```bash
-cd api && uv run python -m app.corpus_check   # metadata, lifecycle, client walls, golden citations
+cd api
+uv run python -m app.corpus_check   # metadata, lifecycle, client walls, golden citations vs parsed sections
+uv run python -m app.ingest         # parse → chunk → embed locally (bge-small) → Neon; idempotent
 ```
+
+Ingestion re-embeds a document only when its file, parser or embedding model changes; a
+metadata-only change (e.g. a new review date in the DMS) updates the record without re-embedding.
+Every ingested document, metadata change, run summary and rejection is written to the audit trail.
 
 ## Audit trail
 

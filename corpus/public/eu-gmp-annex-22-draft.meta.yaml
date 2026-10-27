@@ -13,5 +13,6 @@ client: null
 confidentiality: public
 regulatory_status: consultation_draft
 required_qualifier: "Draft guidance under consultation, not yet in force."
+line_numbers: true  # consultation draft has margin line numbers; the parser strips them
 source_url: https://health.ec.europa.eu/document/download/5f38a92d-bb8e-4264-8898-ea076e926db6_en?filename=mp_vol4_chap4_annex22_consultation_guideline_en.pdf
 retrieved: 2026-10-27

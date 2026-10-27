@@ -145,3 +145,20 @@
   must_cite: ["SOP-PRD-052@2.0 §5"]
   purpose: shared SOP, procedural answer
   split: holdout
+
+- id: G17
+  persona: qa-analyst-a
+  question: What is the contact time for the weekly sporicidal disinfection of isolator ISO-2?
+  expect: answer
+  must_cite: ["SOP-ENG-080@2.0 §5.2"]
+  must_include: ["10 minutes"]
+  purpose: Word document imported via a DMS export, cited from its own heading styles
+  split: tune
+
+- id: G18
+  persona: qa-analyst-a
+  question: How are incoming starting materials sampled at receipt?
+  expect: not_found
+  must_not_cite: ["SOP-WH-090"]
+  purpose: the only document on this topic was rejected at ingestion (no status in the DMS export)
+  split: tune
