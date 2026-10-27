@@ -3,6 +3,14 @@ import "server-only";
 // The Python API owns all data access; the web app only calls it server-side.
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
+async function getJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`);
+  if (!res.ok) {
+    throw new Error(`API ${path} returned ${res.status}`);
+  }
+  return res.json();
+}
+
 export type DbHealth = {
   status: string;
   database: string;
@@ -14,10 +22,24 @@ export type DbHealth = {
   latency_ms: number;
 };
 
-export async function getDbHealth(): Promise<DbHealth> {
-  const res = await fetch(`${API_URL}/health/db`);
-  if (!res.ok) {
-    throw new Error(`API /health/db returned ${res.status}`);
+export type Persona = {
+  id: string;
+  name: string;
+  title: string;
+  role: "qa_analyst" | "qa_manager";
+  can_sign: boolean;
+  organisation: string;
+  clients: string[];
+};
+
+// Fetch first, render after: keeps JSX out of try/catch.
+export async function settle<T>(promise: Promise<T>): Promise<{ data: T; error: null } | { data: null; error: string }> {
+  try {
+    return { data: await promise, error: null };
+  } catch (error) {
+    return { data: null, error: (error as Error).message };
   }
-  return res.json();
 }
+
+export const getDbHealth = () => getJson<DbHealth>("/health/db");
+export const getPersonas = () => getJson<Persona[]>("/personas");

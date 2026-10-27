@@ -65,3 +65,25 @@ def health_db() -> dict:
         "write_read_roundtrip": roundtrip == "round-trip",
         "latency_ms": round((time.perf_counter() - started) * 1000, 1),
     }
+
+
+@app.get("/personas")
+def personas() -> list[dict]:
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT u.id, u.name, u.title, u.role, u.can_sign, t.name,
+                   coalesce(array_agg(c.name ORDER BY c.name) FILTER (WHERE c.id IS NOT NULL), '{}')
+              FROM users u
+              JOIN tenants t ON t.id = u.tenant_id
+              LEFT JOIN clients c ON c.id = ANY (u.client_ids)
+             GROUP BY u.id, t.name
+             ORDER BY u.role, u.id
+            """
+        ).fetchall()
+    return [
+        {"id": id_, "name": name, "title": title, "role": role, "can_sign": can_sign,
+         "organisation": org, "clients": clients}
+        for id_, name, title, role, can_sign, org, clients in rows
+    ]
+
