@@ -33,6 +33,21 @@ npm run dev:web   # http://localhost:3000
 npm run build     # web production build + API compile check
 ```
 
+## Knowledge base
+
+```
+corpus/public/            4 official guidelines (EU GMP Annex 11, draft Annex 22, ICH Q9(R1), ICH Q10) + *.meta.yaml
+corpus/northbridge/       synthetic CDMO documents: shared/ SOPs, client-a/ Aldermoor, client-b/ Corvane
+eval/golden.yaml          16 test questions with expected citations, refusals and holdout split
+```
+
+Every Markdown document carries its metadata (code, version, status, client, …) in a YAML
+header. Sources and licences for the public guidelines are in `corpus/SOURCES.md`.
+
+```bash
+cd api && uv run python -m app.corpus_check   # metadata, lifecycle, client walls, golden citations
+```
+
 ## Audit trail
 
 `audit_log` is append-only (UPDATE/DELETE/TRUNCATE are blocked by triggers) and

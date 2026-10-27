@@ -1,0 +1,17 @@
+code: EU-GMP-ANX22-DRAFT
+title: "EudraLex Volume 4, Annex 22: Artificial Intelligence (consultation draft)"
+version: "2025 consultation"
+# 'effective' here means approved for reference in this library; the regulator's
+# own status is in regulatory_status and must be stated in every answer that cites it.
+status: effective
+doc_type: guideline
+effective_date: null
+review_date: null
+owner: European Commission
+tenant: public
+client: null
+confidentiality: public
+regulatory_status: consultation_draft
+required_qualifier: "Draft guidance under consultation, not yet in force."
+source_url: https://health.ec.europa.eu/document/download/5f38a92d-bb8e-4264-8898-ea076e926db6_en?filename=mp_vol4_chap4_annex22_consultation_guideline_en.pdf
+retrieved: 2026-10-27

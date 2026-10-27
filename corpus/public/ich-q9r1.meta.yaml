@@ -1,0 +1,14 @@
+code: ICH-Q9R1
+title: "ICH Q9(R1): Quality Risk Management"
+version: "R1"
+status: effective
+doc_type: guideline
+effective_date: 2023-01-18
+review_date: null
+owner: ICH
+tenant: public
+client: null
+confidentiality: public
+regulatory_status: ich_step4
+source_url: https://database.ich.org/sites/default/files/ICH_Q9(R1)_Guideline_Step4_2025_0115.pdf
+retrieved: 2026-10-27
