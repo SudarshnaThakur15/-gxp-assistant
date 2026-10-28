@@ -1,6 +1,6 @@
 """Run the full 7-gate pipeline over eval/golden.yaml and score every expectation.
 
-    uv run python -m app.answer_eval [--runs N] [--only G01,G08]
+    uv run python -m app.answer_eval [--runs N] [--only G01,G08] [--save]
 
 Per question: release decision (released / held_for_review / refused), answer type,
 required citations (document + version + section), forbidden documents, required and
@@ -11,16 +11,20 @@ printed per question. Each run writes real audit entries (event_type "ask").
 """
 
 import argparse
+import json
 import re
 import time
 from collections import defaultdict
+from datetime import UTC, datetime
 
 import psycopg
 import yaml
 
-from app.assurance import plain
+from app.assurance import RULESET_FINGERPRINT, RULESET_VERSION, plain
 from app.corpus import REPO_ROOT
 from app.db import connect
+from app.governance import EVAL_RESULTS
+from app.llm import MODEL
 from app.pipeline import ask
 
 ANSWER_TYPE = {"answer": "answer", "not_found": "not_found", "out_of_scope": "refusal"}
@@ -68,12 +72,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--only", help="comma-separated question ids")
+    parser.add_argument("--save", action="store_true", help=f"write the last run to {EVAL_RESULTS} for the UI")
     args = parser.parse_args()
+    if args.save and args.only:
+        parser.error("--save needs the whole question set (no --only)")
     questions = yaml.safe_load((REPO_ROOT / "eval" / "golden.yaml").read_text())
     if args.only:
         questions = [q for q in questions if q["id"] in args.only.split(",")]
 
     results: dict[str, list[bool]] = defaultdict(list)
+    last: dict[str, dict] = {}  # last run per question, for --save
     conn = connect()
     try:
         for run in range(1, args.runs + 1):
@@ -91,6 +99,11 @@ def main() -> None:
                     continue
                 failures = score(q, out)
                 results[q["id"]].append(not failures)
+                last[q["id"]] = {"id": q["id"], "split": q["split"], "contaminated": bool(q.get("contaminated")),
+                                 "persona": q["persona"], "question": q["question"],
+                                 "expected": q["expect_decision"], "actual": out["decision"],
+                                 "answer_type": out["answer_type"], "tier": out["tier"], "pass": not failures,
+                                 "failures": failures, "audit_seq": out["receipt"]["audit_seq"]}
                 failed_checks = [c["id"] for c in out["_draft"]["checks"] if c["status"] == "fail"]
                 print(f"run {run} {q['id']} {q['split']:<7} {out['decision']:<15} {out['tier']:<3} "
                       f"{'PASS' if not failures else 'FAIL'} {time.perf_counter() - t:5.1f}s"
@@ -110,6 +123,18 @@ def main() -> None:
     flaky = [i for i, r in results.items() if len(set(r)) > 1]
     print(f"overall {rate(list(by_id))} | tune {rate(tune)} | clean holdout {rate(holdout)} | "
           f"contaminated holdout {rate(contaminated)} | flaky across runs: {flaky or '-'}")
+
+    if args.save:
+        EVAL_RESULTS.parent.mkdir(exist_ok=True)
+        EVAL_RESULTS.write_text(json.dumps({
+            "recorded_at": datetime.now(UTC).isoformat(), "runs": args.runs,
+            "ruleset": {"version": RULESET_VERSION, "fingerprint": RULESET_FINGERPRINT},
+            "model": MODEL, "flaky": flaky,
+            "rates": {"overall": rate(list(by_id)), "tune": rate(tune), "clean_holdout": rate(holdout),
+                      "contaminated_holdout": rate(contaminated)},
+            "results": [last[i] for i in by_id if i in last],
+        }, indent=2, ensure_ascii=False) + "\n")
+        print(f"saved {EVAL_RESULTS.relative_to(REPO_ROOT)}")
 
 
 if __name__ == "__main__":

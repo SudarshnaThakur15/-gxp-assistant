@@ -15,6 +15,7 @@ from app.audit import verify_chain
 from app.config import settings
 from app.db import pool
 from app.documents import get_document, list_documents
+from app.governance import proof, sources, trust
 from app.pipeline import ask, public_view
 from app.retrieval import retrieve
 from app.review import SignatureRefused, answer_status, decide, queue
@@ -134,6 +135,26 @@ def assurance_endpoint() -> dict:
 def lab_endpoint() -> dict:
     """Deliberately bad drafts and prohibited questions run live through the rules (no AI)."""
     return run_lab()
+
+
+@app.get("/trust")
+def trust_endpoint(persona: str) -> dict:
+    """Trust centre: data boundary, safeguards (some re-checked live) and recent AI calls."""
+    with pool.connection() as conn:
+        return trust(conn, persona)
+
+
+@app.get("/proof")
+def proof_endpoint() -> dict:
+    """The latest saved evaluation over the golden question set."""
+    return proof()
+
+
+@app.get("/sources")
+def sources_endpoint() -> dict:
+    """Where the knowledge base comes from and what the last import did."""
+    with pool.connection() as conn:
+        return sources(conn)
 
 
 @app.get("/documents")

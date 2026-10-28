@@ -291,3 +291,77 @@ export const getDocument = (persona: string, code: string, version?: string) =>
   getJson<DocumentDetail>(`/documents/${q(code)}?persona=${q(persona)}${version ? `&version=${q(version)}` : ""}`);
 export const getAssurance = () => getJson<AssuranceInfo>("/assurance");
 export const getLab = () => getJson<Lab>("/assurance/lab");
+
+export type Trust = {
+  counts: Record<string, number>;
+  boundary: {
+    ai_model: string;
+    ai_provider: string;
+    ai_note: string;
+    embedding_model: string;
+    embedding_note: string;
+    database: string;
+    ruleset_version: string;
+  };
+  audit: { ok: boolean; entries: number; head_hash: string | null };
+  safeguards: { name: string; how: string; ok: boolean | null }[];
+  recent_calls: {
+    seq: number;
+    recorded_at: string;
+    question: string;
+    asked_by: string;
+    model: string | null;
+    tokens: number;
+    ai_did: string;
+    rules_did: string;
+    person_did: string;
+  }[];
+};
+
+type Decision = "released" | "held_for_review" | "refused";
+
+export type Proof =
+  | { available: false }
+  | {
+      available: true;
+      recorded_at: string;
+      runs: number;
+      ruleset: { version: string; fingerprint: string };
+      model: string;
+      flaky: string[];
+      rates: Record<"overall" | "tune" | "clean_holdout" | "contaminated_holdout", string>;
+      results: {
+        id: string;
+        split: string;
+        contaminated: boolean;
+        persona: string;
+        question: string;
+        expected: Decision;
+        actual: Decision;
+        answer_type: string;
+        tier: string;
+        pass: boolean;
+        failures: string[];
+        audit_seq: number;
+      }[];
+      matrix: Record<Decision, Record<Decision, number>>;
+      unsafe_releases: number;
+    };
+
+export type Sources = {
+  documents: { format: string; tenant: string; client: string | null; status: string; count: number }[];
+  last_run: {
+    audit_seq: number;
+    recorded_at: string;
+    ingested: string[];
+    unchanged: number;
+    metadata_updated: string[];
+    withdrawn: string[];
+    rejected: { source: string; problems: string[] }[];
+    failed: unknown[];
+  } | null;
+};
+
+export const getTrust = (persona: string) => getJson<Trust>(`/trust?persona=${q(persona)}`);
+export const getProof = () => getJson<Proof>("/proof");
+export const getSources = () => getJson<Sources>("/sources");

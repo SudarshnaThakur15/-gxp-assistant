@@ -48,6 +48,9 @@ the API builds every view from the audit log.
 | `/assurance` | Every rule in plain English, rule-set fingerprint, failures recorded, and the assurance lab: bad drafts run live through the rules (no AI) |
 | `/documents`, `/documents/{code}` | Controlled documents and versions; citations link to the exact section |
 | `/audit` | Chain verification, every entry, CSV export (entry contents for QA Managers only) |
+| `/proof` | The saved golden-set evaluation (`answer_eval --save`): expected vs actual outcome, unsafe releases; adjustable ROI model |
+| `/trust` | Data boundary (the AI model host is external), safeguards with live checks, recent AI calls |
+| `/sources` | The three document sources and the last import, including rejected files |
 
 What a persona sees is enforced by the API, not the page: requesters see their own runs, a QA
 Manager sees the runs of the programmes they cover, and withheld drafts and entry contents are

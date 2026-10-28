@@ -18,7 +18,15 @@ const GROUPS = [
       { href: "/how-it-works", label: "How it works" },
       { href: "/assurance", label: "Assurance layer" },
       { href: "/documents", label: "Document library" },
+      { href: "/proof", label: "Proof and value" },
+      { href: "/trust", label: "Trust centre" },
       { href: "/audit", label: "Audit trail" },
+    ],
+  },
+  {
+    heading: "Setup",
+    links: [
+      { href: "/sources", label: "Document sources" },
       { href: "/status", label: "System status" },
     ],
   },
