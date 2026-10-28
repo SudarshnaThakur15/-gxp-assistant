@@ -15,6 +15,9 @@ const GROUPS = [
   {
     heading: "Evidence",
     links: [
+      { href: "/how-it-works", label: "How it works" },
+      { href: "/assurance", label: "Assurance layer" },
+      { href: "/documents", label: "Document library" },
       { href: "/audit", label: "Audit trail" },
       { href: "/status", label: "System status" },
     ],

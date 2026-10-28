@@ -10,9 +10,11 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from app.assurance_info import catalogue, gate_stats, run_lab
 from app.audit import verify_chain
 from app.config import settings
 from app.db import pool
+from app.documents import get_document, list_documents
 from app.pipeline import ask, public_view
 from app.retrieval import retrieve
 from app.review import SignatureRefused, answer_status, decide, queue
@@ -119,6 +121,36 @@ def audit_csv(persona: str) -> Response:
                          r["prev_hash"], r["hash"]])
     return Response(out.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": 'attachment; filename="audit-trail.csv"'})
+
+
+@app.get("/assurance")
+def assurance_endpoint() -> dict:
+    """The rules in plain English, the rule-set fingerprint and live counts per gate."""
+    with pool.connection() as conn:
+        return catalogue() | {"stats": gate_stats(conn)}
+
+
+@app.get("/assurance/lab")
+def lab_endpoint() -> dict:
+    """Deliberately bad drafts and prohibited questions run live through the rules (no AI)."""
+    return run_lab()
+
+
+@app.get("/documents")
+def documents_endpoint(persona: str) -> list[dict]:
+    """Controlled documents this persona may see, one row per document with its versions."""
+    with pool.connection() as conn:
+        return list_documents(conn, persona)
+
+
+@app.get("/documents/{code}")
+def document_endpoint(code: str, persona: str, version: str | None = None) -> dict:
+    """One document version with its sections (default: the version in force)."""
+    with pool.connection() as conn:
+        doc = get_document(conn, persona, code, version)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="No such document, or not visible to you.")
+    return doc
 
 
 @app.get("/runs")

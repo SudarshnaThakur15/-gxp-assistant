@@ -29,7 +29,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <Sidebar />
           </Suspense>
           <div className="flex min-w-0 flex-1 flex-col">
-            <p className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:px-8">
+            <p className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900 sm:px-8 print:hidden">
               Demo: the documents, organisation and people are fictional; the AI model is real. Answers are
               released, held or refused by fixed rules, never by the AI. Not a validated system.
             </p>

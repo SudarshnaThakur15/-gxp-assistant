@@ -33,6 +33,26 @@ npm run dev:web   # http://localhost:3000
 npm run build     # web production build + API compile check
 ```
 
+## Web interface
+
+The persona switcher in the sidebar stands in for sign-in. Every screen reads from the API, and
+the API builds every view from the audit log.
+
+| Page | What it shows |
+|---|---|
+| `/` Console | Ask a question; live counts; answers waiting for your signature; recent questions |
+| `/runs`, `/runs/{n}` | Every run with filters; one run's answer, reasons, 11 checks, 7-gate trace, signature and history |
+| `/runs/{n}/evidence` | Printable inspection evidence pack assembled from the audit trail |
+| `/reviews` | Held answers with the electronic signature form (QA Managers) |
+| `/how-it-works` | The 7 gates, who decides each, live counts |
+| `/assurance` | Every rule in plain English, rule-set fingerprint, failures recorded, and the assurance lab: bad drafts run live through the rules (no AI) |
+| `/documents`, `/documents/{code}` | Controlled documents and versions; citations link to the exact section |
+| `/audit` | Chain verification, every entry, CSV export (entry contents for QA Managers only) |
+
+What a persona sees is enforced by the API, not the page: requesters see their own runs, a QA
+Manager sees the runs of the programmes they cover, and withheld drafts and entry contents are
+shown only to signers.
+
 ## Knowledge base
 
 ```

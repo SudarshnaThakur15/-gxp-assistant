@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from app.audit import canonical_json
 from app.retrieval import Hit, source_id
 
-RULESET_VERSION = "2026.10.28-3"
+RULESET_VERSION = "2026.10.28-4"
 
 # --- Gate 1: screening rules -------------------------------------------------
 # A rule fires when its `decision` pattern matches and (if given) its `target` pattern
@@ -102,6 +102,20 @@ SCOPE_CONCEPTS = {
     "bag": r"\bbags?\b",
     "powder": r"\bpowders?\b",
 }
+# Each check: title and severity ("hard": a failure refuses the answer; "review": it holds it for QA).
+CHECKS = {
+    "V1": ("An answer must contain at least one cited claim", "hard"),
+    "V2": ("Every citation points to a passage retrieved for this question", "hard"),
+    "V3": ("Every cited document version is in force right now", "hard"),
+    "V4": ("Every quote appears word for word in its source", "hard"),
+    "V5": ("Quotes are long enough to be real evidence", "hard"),
+    "V6": ("Numbers in each claim appear in its cited document", "review"),
+    "V7": ("No decision language (release, classification, root cause, CAPA)", "hard"),
+    "V8": ("Injected instructions are neither followed nor repeated", "hard"),
+    "V9": ("Draft guidance carries its 'not yet in force' label", "hard"),
+    "V10": ("Each claim adds no product form or identifier its cited document doesn't mention", "hard"),
+    "V11": ("The cited documents cover what the question is specifically about", "review"),
+}
 IDENTIFIER = r"\b[A-Z]{2,4}-\d{1,3}\b"  # product, equipment and batch identifiers (ALD-101, ISO-2, FIT-04)
 NUMBER = r"\d+(?:\.\d+)?"
 WHOLE_NUMBER = r"(?<![\d.]){}(?!\.?\d)"  # a claimed number must stand alone: "5" is not in "0.5" or "25"
@@ -129,7 +143,7 @@ TIERS = {"T1": "Knowledge answer: released by rules with citations",
 RULESET = {
     "version": RULESET_VERSION,
     "screen": SCREEN_RULES, "unnamed_target": UNNAMED_TARGET,
-    "validation": {"quote_min_words": QUOTE_MIN_WORDS, "quote_min_chars": QUOTE_MIN_CHARS,
+    "validation": {"checks": CHECKS, "quote_min_words": QUOTE_MIN_WORDS, "quote_min_chars": QUOTE_MIN_CHARS,
                    "evidence_keep": EVIDENCE_KEEP, "prohibited_language": PROHIBITED_LANGUAGE,
                    "injection_patterns": INJECTION_PATTERNS, "scope_concepts": SCOPE_CONCEPTS,
                    "identifier": IDENTIFIER, "number": NUMBER, "whole_number": WHOLE_NUMBER},
@@ -219,7 +233,8 @@ def validate(question: str, draft: dict, hits: list[Hit], in_force: dict[int, bo
     claims = draft.get("claims", []) if draft.get("status") == "answered" else []
     checks: list[Check] = []
 
-    def add(cid, title, severity, failures, ok_detail="", status_if_ok="pass"):
+    def add(cid, failures, ok_detail="", status_if_ok="pass"):
+        title, severity = CHECKS[cid]
         checks.append(Check(cid, title, severity, "fail" if failures else status_if_ok,
                             "; ".join(failures) if failures else ok_detail))
 
@@ -229,12 +244,12 @@ def validate(question: str, draft: dict, hits: list[Hit], in_force: dict[int, bo
                                h.code, h.version, h.section, h.title]))
 
     if draft.get("status") == "answered" and not claims:
-        add("V1", "An answer must contain at least one cited claim", "hard", ["answered but no claims"])
+        add("V1", ["answered but no claims"])
         return checks, [], []
     if not claims:
         checks.append(Check("V1", "Not found: nothing to verify", "hard", "skip", "draft says not found"))
         return checks, [], []
-    add("V1", "An answer must contain at least one cited claim", "hard", [], f"{len(claims)} claim(s)")
+    add("V1", [], f"{len(claims)} claim(s)")
 
     resolved, missing = [], []
     for i, c in enumerate(claims, 1):
@@ -242,21 +257,21 @@ def validate(question: str, draft: dict, hits: list[Hit], in_force: dict[int, bo
         if h is None:
             missing.append(f"claim {i} cites {c['source_id']}, which was not retrieved")
         resolved.append({**c, "n": i, "hit": h})
-    add("V2", "Every citation points to a passage retrieved for this question", "hard", missing)
+    add("V2", missing)
     cited = [r for r in resolved if r["hit"] is not None]
 
     stale = [f"claim {r['n']}: {r['hit'].code} v{r['hit'].version} is no longer in force"
              for r in cited if not in_force.get(r["hit"].document_id, False)]
-    add("V3", "Every cited document version is in force right now", "hard", stale)
+    add("V3", stale)
 
     not_verbatim = [f"claim {r['n']}: quote not found word for word in {r['hit'].code} §{r['hit'].section}"
                     for r in cited
                     if not evidence_form(r["quote"]) or evidence_form(r["quote"]) not in evidence_form(r["hit"].text)]
-    add("V4", "Every quote appears word for word in its source", "hard", not_verbatim)
+    add("V4", not_verbatim)
 
     too_short = [f"claim {r['n']}: quote '{r['quote']}' is too short to be evidence" for r in resolved
                  if len(r["quote"].split()) < QUOTE_MIN_WORDS and len(evidence_form(r["quote"])) < QUOTE_MIN_CHARS]
-    add("V5", "Quotes are long enough to be real evidence", "hard", too_short)
+    add("V5", too_short)
 
     unsupported = []
     for r in cited:
@@ -265,11 +280,11 @@ def validate(question: str, draft: dict, hits: list[Hit], in_force: dict[int, bo
                          if not re.search(WHOLE_NUMBER.format(re.escape(n)), evidence)})
         if absent:
             unsupported.append(f"claim {r['n']}: {', '.join(absent)} not in {r['hit'].code}")
-    add("V6", "Numbers in each claim appear in its cited document", "review", unsupported)
+    add("V6", unsupported)
 
     forbidden = [f"claim {r['n']}: '{m.group(0)}'" for r in resolved
                  if (m := re.search(PROHIBITED_LANGUAGE, plain(r["text"]), re.I))]
-    add("V7", "No decision language (release, classification, root cause, CAPA)", "hard", forbidden)
+    add("V7", forbidden)
 
     echoed = []
     for r in cited:
@@ -278,23 +293,22 @@ def validate(question: str, draft: dict, hits: list[Hit], in_force: dict[int, bo
             echoed.append(f"claim {r['n']} repeats an instruction aimed at AI systems")
         elif sid in injected and evidence_form(r["quote"]) in evidence_form(h.text[injected[sid]:]):
             echoed.append(f"claim {r['n']} quotes injected text in {h.code} §{h.section}")
-    add("V8", "Injected instructions are neither followed nor repeated", "hard", echoed)
+    add("V8", echoed)
 
     notices = []
     for q in dict.fromkeys(r["hit"].required_qualifier for r in cited if r["hit"].required_qualifier):
         notices.append(q)
-    add("V9", "Draft guidance carries its 'not yet in force' label", "hard", [],
+    add("V9", [],
         f"label added by rule: {' | '.join(notices)}" if notices else "no draft guidance cited",
         status_if_ok="fixed" if notices else "pass")
 
     added = [f"claim {r['n']} says {', '.join(t)}, which {r['hit'].code} never mentions"
              for r in cited if (t := unsupported_terms(r["text"], document_text(r["hit"])))]
-    add("V10", "Each claim adds no product form or identifier its cited document doesn't mention", "hard", added)
+    add("V10", added)
     evidence = " ".join(f"{h.text} {h.title} {h.code} {h.section}"
                         for h in {source_id(r["hit"]): r["hit"] for r in cited}.values())
     asked = unsupported_terms(question, evidence)
-    add("V11", "The cited documents cover what the question is specifically about", "review",
-        [f"question names {', '.join(asked)}; the cited documents never mention it"] if asked else [])
+    add("V11", [f"question names {', '.join(asked)}; the cited documents never mention it"] if asked else [])
     return checks, resolved, notices
 
 

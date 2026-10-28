@@ -61,3 +61,4 @@ def test_signature_line_shows_name_title_meaning_and_time():
                           "signed_at": "2026-10-28T14:05:09+00:00"})
     assert line == ("Jordan Lee, QA Manager. Approved: reviewed against the cited sources and released for use. "
                     "Signed 28 Oct 2026 14:05 UTC.")
+

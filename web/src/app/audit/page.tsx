@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 
-import { reverifyAudit } from "@/app/actions";
+import { refreshPage } from "@/app/actions";
 import { Card, ErrorNote, formatTime, Mono, PageHeader, Skeleton } from "@/components/ui";
 import { getAudit, settle, verifyAudit } from "@/lib/api";
 import { getCurrentPersona } from "@/lib/persona";
@@ -41,7 +41,7 @@ async function ChainStatus() {
           <p className="text-sm text-rose-800">Could not verify: {res.error}</p>
         )}
         <div className="flex gap-2">
-          <form action={reverifyAudit}>
+          <form action={refreshPage}>
             <button className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white">Re-verify</button>
           </form>
           <a href="/audit/csv" className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-800 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-50">

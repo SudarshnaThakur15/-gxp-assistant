@@ -3,7 +3,7 @@ import { Suspense } from "react";
 
 import { SignForm } from "@/components/sign-form";
 import {
-  ByBadge, Card, CheckList, Citations, citationRef, ErrorNote, formatTime, Mono, OutcomePill, PageHeader, Skeleton, TierChip,
+  ByBadge, Card, CheckList, CitationChip, Citations, ErrorNote, formatTime, Mono, OutcomePill, PageHeader, Skeleton, TierChip,
 } from "@/components/ui";
 import { getRun, settle, type Gate, type RunDetail } from "@/lib/api";
 import { getCurrentPersona } from "@/lib/persona";
@@ -41,6 +41,10 @@ async function Run({ params }: { params: PageProps<"/runs/[seq]">["params"] }) {
         <span className="text-xs text-zinc-500">
           Rules <Mono>{run.ruleset.version}</Mono> · AI <Mono>{run.model ?? "not called"}</Mono>
         </span>
+        <Link href={`/runs/${run.seq}/evidence`}
+          className="ml-auto rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-800 ring-1 ring-inset ring-zinc-300 hover:bg-white">
+          Inspection evidence pack ↗
+        </Link>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -196,7 +200,7 @@ function GateDetail({ gate: g }: { gate: Gate }) {
             <ul className="mt-1 flex flex-col gap-0.5">
               {g.passages.map((p, i) => (
                 <li key={i}>
-                  <Mono>{citationRef(p)}</Mono> · score {p.score.toFixed(3)}
+                  <CitationChip c={p} /> · score {p.score.toFixed(3)}
                   {p.injection_flagged && <span className="ml-1 text-rose-700">· contains text addressed to AI, treated as data</span>}
                 </li>
               ))}

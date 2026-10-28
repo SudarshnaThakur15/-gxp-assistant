@@ -230,3 +230,64 @@ export const getRun = (persona: string, seq: number) => getJson<RunDetail>(`/run
 export const getQueue = (persona: string) => getJson<QueueItem[]>(`/reviews?persona=${q(persona)}`);
 export const getAudit = (persona: string, limit: number, before?: number) =>
   getJson<AuditEntry[]>(`/audit?persona=${q(persona)}&limit=${limit}${before ? `&before=${before}` : ""}`);
+
+export type DocVersion = { version: string; status: string; effective_date: string | null };
+
+export type DocumentSummary = {
+  code: string;
+  title: string;
+  version: string;
+  status: string;
+  doc_type: string;
+  effective_date: string | null;
+  owner: string | null;
+  client_id: string | null;
+  regulatory_status: string | null;
+  record_state: string | null;
+  source_format: string;
+  sections: number;
+  versions: DocVersion[];
+};
+
+export type DocumentDetail = Omit<DocumentSummary, "sections"> & {
+  review_date: string | null;
+  required_qualifier: string | null;
+  source_url: string | null;
+  fingerprint: string | null;
+  sections: { path: string; heading: string | null; page: number | null; text: string }[];
+};
+
+export type AssuranceInfo = {
+  ruleset: { version: string; fingerprint: string };
+  screen_rules: { id: string; title: string; note: string }[];
+  checks: { id: string; title: string; severity: "hard" | "review"; note: string }[];
+  tier_rules: { id: string; rule: string; outcome: string }[];
+  stats: {
+    counts: Record<string, number>;
+    failed_checks: Record<string, number>;
+    rulesets: Record<string, number>;
+    audit: { entries: number; ok: boolean };
+  };
+};
+
+export type LabCase = {
+  id: string;
+  kind: string;
+  name: string;
+  question: string;
+  claims: { text: string; source: string; quote: string }[];
+  expected: string;
+  actual: string;
+  expected_trigger: string | null;
+  triggered: string[];
+  notices: string[];
+  as_expected: boolean;
+};
+
+export type Lab = { ruleset_version: string; cases: LabCase[]; passed: number; total: number };
+
+export const getDocuments = (persona: string) => getJson<DocumentSummary[]>(`/documents?persona=${q(persona)}`);
+export const getDocument = (persona: string, code: string, version?: string) =>
+  getJson<DocumentDetail>(`/documents/${q(code)}?persona=${q(persona)}${version ? `&version=${q(version)}` : ""}`);
+export const getAssurance = () => getJson<AssuranceInfo>("/assurance");
+export const getLab = () => getJson<Lab>("/assurance/lab");

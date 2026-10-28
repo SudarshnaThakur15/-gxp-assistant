@@ -46,7 +46,7 @@ async function ViewingAs() {
 export async function Sidebar() {
   const viewingAs = await ViewingAs();
   return (
-    <aside className="border-b border-zinc-200 bg-white lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+    <aside className="border-b border-zinc-200 bg-white print:hidden lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-r">
       {/* Phone and tablet: brand + a menu that opens */}
       <details className="group px-4 py-3 lg:hidden">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3">

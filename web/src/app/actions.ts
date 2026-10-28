@@ -15,8 +15,9 @@ export async function switchPersona(formData: FormData) {
   (await cookies()).set(PERSONA_COOKIE, id, { httpOnly: true, sameSite: "lax", path: "/" });
 }
 
-export async function reverifyAudit() {
-  refresh(); // the page verifies the chain on every render
+// Pages that verify the chain or run the lab do so on every render: refreshing re-runs them.
+export async function refreshPage() {
+  refresh();
 }
 
 export type AskState ={ question: string; result: AskResult | null; error: string | null };
