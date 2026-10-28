@@ -96,7 +96,8 @@ Every question passes the same gates in the same order (`api/app/pipeline.py`):
 
 ```bash
 cd api
-uv run pytest -q                        # Assurance Layer unit tests (no AI, no database)
+uv run pytest -q                        # unit tests: rules, lab, signatures (no AI, no database)
+RUN_DB_TESTS=1 uv run pytest -q tests/test_retrieval_db.py   # permission tests on the real database (rolled back)
 uv run python -m app.retrieval_eval     # retrieval only
 uv run python -m app.answer_eval        # all 7 gates over eval/golden.yaml (calls the model; several minutes)
 ```

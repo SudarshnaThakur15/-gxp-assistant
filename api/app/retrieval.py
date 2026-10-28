@@ -3,8 +3,9 @@
 One SQL round trip:
   - allowed chunks only (effective, persona's tenant or public, shared or persona's clients)
   - vector search + full-text search, fused with reciprocal rank fusion (RRF)
-  - at most MAX_PER_DOC chunks per document; a document named in the question comes in whole
-    (up to MAX_NAMED_CHUNKS)
+  - at most MAX_PER_DOC chunks per document, except documents named in the question
+    (e.g. "DEV-2026-019"): those are included directly, not just boosted in the ranking
+    (see pick_named)
   - plus an exclusion trace: close matches that the filters removed, and why.
     Authorisation is checked first: anything the persona may not see is only counted,
     never named (naming it would leak that it exists).
@@ -92,7 +93,7 @@ fused AS (
            coalesce(1.0 / (%(rrf)s + vec.r), 0) + coalesce(1.0 / (%(rrf)s + kw.r), 0) AS score
       FROM vec FULL JOIN kw ON vec.id = kw.id
 ),
-named AS (  -- documents the question names explicitly (e.g. "DEV-2026-019")
+named AS (  -- every allowed chunk of a document the question names; pick_named() chooses among them
     SELECT a.id FROM allowed a JOIN documents d ON d.id = a.document_id WHERE d.code = ANY (%(codes)s)
 ),
 candidates AS (
@@ -117,34 +118,55 @@ SELECT 'hit' AS kind, c.id AS chunk_id, c.document_id, d.code, d.version, d.titl
        d.fingerprint, c.section_path AS section, c.page, c.text,
        1 - (c.embedding <=> %(qv)s::vector) AS similarity, k.score::float8 AS score,
        d.regulatory_status, d.required_qualifier,
-       k.is_named, c.ordinal, NULL AS reason
+       k.is_named, c.ordinal, NULL AS status, NULL::boolean AS authorised
   FROM capped k JOIN chunks c ON c.id = k.id JOIN documents d ON d.id = c.document_id
  WHERE k.per_doc <= %(cap)s OR k.is_named
 UNION ALL
+-- Authorisation and status are separate fields: a passage the persona may not see is never
+-- named, whatever its status (e.g. another client's superseded document).
 SELECT 'excluded', e.id, e.document_id, d.code, d.version, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL::float8, NULL, NULL, NULL, NULL,
-       CASE WHEN NOT (e.tenant_id IN (p.tenant_id, 'public')
-                      AND (e.client_id IS NULL OR e.client_id = ANY (p.client_ids)))
-            THEN 'not authorised'          -- authorisation first: never name what the persona may not see
-            ELSE e.status END
+       NULL, NULL::float8, NULL, NULL, NULL, NULL, e.status,
+       coalesce(e.tenant_id IN (p.tenant_id, 'public')
+                AND (e.client_id IS NULL OR e.client_id = ANY (p.client_ids)), false)
   FROM excluded e JOIN documents d ON d.id = e.document_id, persona p
 """
 
 HIT_FIELDS = list(Hit.__dataclass_fields__)
 
 
+def pick_named(rows: list[dict], codes: list[str], budget: int = MAX_NAMED_CHUNKS) -> list[dict]:
+    """Chunks of the documents named in the question.
+
+    Whole documents if they all fit in the budget. Otherwise the budget is shared in turn
+    between the named documents (in the order the question names them), each giving its
+    most relevant chunks first, so one long document cannot crowd out another.
+    Returned in document order. A named document the persona may not see has no rows here."""
+    if len(rows) <= budget:
+        chosen = rows
+    else:
+        queues = [sorted((r for r in rows if r["code"] == code), key=lambda r: (-r["similarity"], r["ordinal"]))
+                  for code in dict.fromkeys(codes)]
+        chosen = []
+        while len(chosen) < budget and any(queues):
+            for q in queues:
+                if q and len(chosen) < budget:
+                    chosen.append(q.pop(0))
+    order = {code: i for i, code in enumerate(dict.fromkeys(codes))}
+    return sorted(chosen, key=lambda r: (order.get(r["code"], len(order)), r["ordinal"]))
+
+
 def retrieve(conn: psycopg.Connection, persona: str, question: str) -> Retrieval:
     t0 = time.perf_counter()
     qv = to_pgvector(embed_query(question))
     t1 = time.perf_counter()
+    codes = DOC_REF.findall(question.upper())
     with conn.cursor(row_factory=dict_row) as cur:
         rows = cur.execute(SQL, {"persona": persona, "qv": qv, "kq": keyword_query(question),
-                                 "n": CANDIDATES, "rrf": RRF_K, "cap": MAX_PER_DOC,
-                                 "codes": DOC_REF.findall(question.upper())}).fetchall()
+                                 "n": CANDIDATES, "rrf": RRF_K, "cap": MAX_PER_DOC, "codes": codes}).fetchall()
     t2 = time.perf_counter()
 
     hit_rows = [r for r in rows if r["kind"] == "hit"]
-    named = sorted((r for r in hit_rows if r["is_named"]), key=lambda r: (r["code"], r["ordinal"]))[:MAX_NAMED_CHUNKS]
+    named = pick_named([r for r in hit_rows if r["is_named"]], codes)
     named_ids = {r["chunk_id"] for r in named}
     ranked = sorted((r for r in hit_rows if r["chunk_id"] not in named_ids), key=lambda r: r["score"], reverse=True)
     picked = named + ranked[:max(TOP_K - len(named), 0)]
@@ -155,9 +177,9 @@ def retrieve(conn: psycopg.Connection, persona: str, question: str) -> Retrieval
     for r in rows:
         if r["kind"] != "excluded":
             continue
-        if r["reason"] == "not authorised":
+        if r["authorised"] is not True:  # never name what the persona may not see
             hidden += 1
-        elif (item := {"document": f"{r['code']} v{r['version']}", "reason": r["reason"]}) not in excluded:
+        elif (item := {"document": f"{r['code']} v{r['version']}", "reason": r["status"]}) not in excluded:
             excluded.append(item)
     if hidden:
         excluded.append({"document": None,
