@@ -1,9 +1,12 @@
+import csv
+import io
+import json
 import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -13,6 +16,7 @@ from app.db import pool
 from app.pipeline import ask, public_view
 from app.retrieval import retrieve
 from app.review import SignatureRefused, answer_status, decide, queue
+from app.runs import audit_entries, list_runs, run_detail
 
 
 @asynccontextmanager
@@ -95,22 +99,43 @@ def personas() -> list[dict]:
 
 
 @app.get("/audit")
-def audit_entries(limit: int = 20) -> list[dict]:
+def audit_endpoint(persona: str, limit: int = 50, before: int | None = None) -> list[dict]:
+    """Newest first. Payloads (questions, drafts) only for signers; the chain itself for everyone."""
     with pool.connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT seq, recorded_at, actor, event_type, payload, prev_hash, hash
-              FROM audit_log
-             ORDER BY seq DESC
-             LIMIT %s
-            """,
-            (min(limit, 200),),
-        ).fetchall()
-    return [
-        {"seq": seq, "recorded_at": recorded_at, "actor": actor, "event_type": event_type,
-         "payload": payload, "prev_hash": prev_hash, "hash": hash_}
-        for seq, recorded_at, actor, event_type, payload, prev_hash, hash_ in rows
-    ]
+        return audit_entries(conn, persona, limit, before)
+
+
+@app.get("/audit.csv")
+def audit_csv(persona: str) -> Response:
+    """The whole audit trail as CSV, with the same payload rule as /audit."""
+    with pool.connection() as conn:
+        rows = audit_entries(conn, persona, limit=100_000)
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["seq", "recorded_at", "actor", "event_type", "payload", "prev_hash", "hash"])
+    for r in reversed(rows):
+        writer.writerow([r["seq"], r["recorded_at"].isoformat(), r["actor"], r["event_type"],
+                         "" if r["payload"] is None else json.dumps(r["payload"], ensure_ascii=False),
+                         r["prev_hash"], r["hash"]])
+    return Response(out.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="audit-trail.csv"'})
+
+
+@app.get("/runs")
+def runs_endpoint(persona: str, filter: str | None = None) -> dict:
+    """Question runs visible to this persona, with counts per outcome."""
+    with pool.connection() as conn:
+        return list_runs(conn, persona, filter)
+
+
+@app.get("/runs/{seq}")
+def run_endpoint(seq: int, persona: str) -> dict:
+    """One run: answer, checks, gate trace, review and audit history, as this persona may see it."""
+    with pool.connection() as conn:
+        run = run_detail(conn, persona, seq)
+    if run is None:
+        raise HTTPException(status_code=404, detail="No run with this number is visible to you.")
+    return run
 
 
 class RetrieveRequest(BaseModel):

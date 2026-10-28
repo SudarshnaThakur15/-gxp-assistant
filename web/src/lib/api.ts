@@ -11,6 +11,26 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json();
 }
 
+// For actions: the caller decides what an error status means.
+export async function postJson<T>(
+  path: string,
+  body: unknown,
+): Promise<{ ok: true; data: T } | { ok: false; status: number; detail: unknown }> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => null);
+  return res.ok ? { ok: true, data: json as T } : { ok: false, status: res.status, detail: json?.detail ?? null };
+}
+
+export function getRaw(path: string): Promise<Response> {
+  return fetch(`${API_URL}${path}`);
+}
+
+const q = encodeURIComponent;
+
 export type DbHealth = {
   status: string;
   database: string;
@@ -40,8 +60,160 @@ export type AuditVerification = {
   head_hash: string | null;
 };
 
+export type Outcome = "released" | "not_found" | "held" | "approved" | "rejected" | "refused";
+export type Filter = "released" | "held" | "decided" | "refused";
+
+export type Citation = {
+  n: number;
+  doc: string;
+  version: string;
+  section: string;
+  page: number | null;
+  quotes: string[];
+};
+
+export type Check = {
+  id: string;
+  title: string;
+  severity: "hard" | "review";
+  status: "pass" | "fail" | "fixed" | "skip";
+  detail: string | null;
+};
+
+export type RunSummary = {
+  seq: number;
+  recorded_at: string;
+  question: string;
+  requested_by: { id: string; name: string };
+  outcome: Outcome;
+  label: string;
+  tier: string;
+  reason: string | null;
+  model: string | null;
+  ruleset_version: string;
+};
+
+export type RunList = { counts: Record<"all" | Filter, number>; runs: RunSummary[] };
+
+export type Llm = {
+  model: string;
+  provider: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  rate_limit_wait_s?: number;
+};
+
+export type Gate = {
+  n: number;
+  gate: string;
+  by: string;
+  result: string;
+  rules?: { rule: string; title: string }[];
+  ai_intent?: string | null;
+  ai_reason?: string | null;
+  llm?: Llm | null;
+  prompt?: { version: string; fingerprint: string } | null;
+  passages?: { doc: string; version: string; section: string; score: number; injection_flagged: boolean }[];
+  excluded?: { reason: string; document: string | null }[];
+  best_similarity?: number | null;
+  claims?: number;
+  summary?: { checks: number; failed: string[] };
+  reasons?: string[];
+  audit_seq?: number;
+  audit_hash?: string;
+};
+
+export type HistoryEvent = {
+  seq: number;
+  recorded_at: string;
+  actor: string;
+  event_type: string;
+  hash: string;
+  text: string;
+};
+
+export type Review = {
+  audit_seq: number;
+  audit_hash: string;
+  outcome: string;
+  signature: string;
+  reason: string | null;
+  content_hash: string;
+};
+
+export type RunDetail = {
+  seq: number;
+  recorded_at: string;
+  hash: string;
+  prev_hash: string;
+  question: string;
+  requested_by: { id: string; name: string };
+  outcome: Outcome;
+  label: string;
+  decision: string;
+  answer_type: string;
+  tier: string;
+  reasons: string[];
+  error: string | null;
+  answer: { text: string; withheld: boolean; citations?: Citation[]; notices?: string[] } | null;
+  checks: Check[];
+  trace: Gate[];
+  model: string | null;
+  ruleset: { version: string; fingerprint: string };
+  ms: Record<string, number>;
+  review: Review | null;
+  can_review: boolean;
+  history: HistoryEvent[];
+};
+
+export type QueueItem = {
+  ask_seq: number;
+  requested_by: string;
+  question: string;
+  tier: string;
+  reasons: string[];
+  text: string;
+  citations: Citation[];
+  content_hash: string;
+};
+
+export type AuditEntry = {
+  seq: number;
+  recorded_at: string;
+  actor: string;
+  event_type: string;
+  payload: Record<string, unknown> | null;
+  prev_hash: string;
+  hash: string;
+};
+
+// What POST /ask returns to the requester (pipeline.public_view).
+export type AskResult = {
+  decision: "released" | "held_for_review" | "refused";
+  decision_label: string;
+  answer_type: string;
+  tier: string;
+  reasons: string[];
+  message: string;
+  citations: Citation[];
+  notices: string[];
+  receipt: { audit_seq: number; audit_hash: string; ruleset_version: string };
+  gates: { n: number; gate: string; by: string; result: string }[];
+  ms: Record<string, number>;
+};
+
+export type SignResult = {
+  ask_seq: number;
+  outcome: "approved" | "rejected";
+  signature: string;
+  content_hash: string;
+  receipt: { audit_seq: number; audit_hash: string };
+};
+
 // Fetch first, render after: keeps JSX out of try/catch.
-export async function settle<T>(promise: Promise<T>): Promise<{ data: T; error: null } | { data: null; error: string }> {
+export async function settle<T>(
+  promise: Promise<T>,
+): Promise<{ data: T; error: null } | { data: null; error: string }> {
   try {
     return { data: await promise, error: null };
   } catch (error) {
@@ -52,3 +224,9 @@ export async function settle<T>(promise: Promise<T>): Promise<{ data: T; error: 
 export const getDbHealth = () => getJson<DbHealth>("/health/db");
 export const getPersonas = () => getJson<Persona[]>("/personas");
 export const verifyAudit = () => getJson<AuditVerification>("/audit/verify");
+export const getRuns = (persona: string, filter?: string) =>
+  getJson<RunList>(`/runs?persona=${q(persona)}${filter ? `&filter=${q(filter)}` : ""}`);
+export const getRun = (persona: string, seq: number) => getJson<RunDetail>(`/runs/${seq}?persona=${q(persona)}`);
+export const getQueue = (persona: string) => getJson<QueueItem[]>(`/reviews?persona=${q(persona)}`);
+export const getAudit = (persona: string, limit: number, before?: number) =>
+  getJson<AuditEntry[]>(`/audit?persona=${q(persona)}&limit=${limit}${before ? `&before=${before}` : ""}`);

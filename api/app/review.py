@@ -91,13 +91,12 @@ def verify_password(password: str, stored: str | None) -> bool:
 
 # --- what is signed ----------------------------------------------------------------
 
-def signed_content(seq: int, hash_: str, payload: dict) -> dict:
-    """Exactly what a reviewer sees and signs: the held text and its citations, bound to
-    the audit entry. Citations are numbered as the pipeline numbers them."""
-    passages = {p["id"]: p for p in payload["retrieval"]["passages"]}
+def recorded_citations(payload: dict) -> list[dict]:
+    """Citations rebuilt from a recorded run's claims and passages, numbered as the pipeline numbers them."""
+    passages = {p["id"]: p for p in (payload.get("retrieval") or {}).get("passages", [])}
     markers: dict[str, int] = {}
     citations = []
-    for c in payload["claims"]:
+    for c in payload.get("claims", []):
         p = passages.get(c["source_id"])
         if p is None:
             continue
@@ -107,8 +106,14 @@ def signed_content(seq: int, hash_: str, payload: dict) -> dict:
                               "section": p["section"], "page": p.get("page"),
                               "document_fingerprint": p["document_fingerprint"], "quotes": []})
         citations[markers[c["source_id"]] - 1]["quotes"].append(c["quote"])
+    return citations
+
+
+def signed_content(seq: int, hash_: str, payload: dict) -> dict:
+    """Exactly what a reviewer sees and signs: the held text and its citations, bound to the audit entry."""
     return {"ask": {"seq": seq, "hash": hash_}, "question": payload["question"],
-            "requested_by": payload["persona"], "text": payload["withheld_draft"], "citations": citations}
+            "requested_by": payload["persona"], "text": payload["withheld_draft"],
+            "citations": recorded_citations(payload)}
 
 
 def content_hash(content: dict) -> str:
