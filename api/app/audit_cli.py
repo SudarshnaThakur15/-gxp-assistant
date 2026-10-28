@@ -18,7 +18,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from app.audit import append_event, canonical_json, verify_chain
-from app.config import settings
+from app.db import connect
 
 BACKUP_FILE = Path(__file__).resolve().parents[1] / ".tamper-backup.json"
 
@@ -32,7 +32,7 @@ SAMPLE_QUESTIONS = [
 
 
 def cmd_append(count: int) -> None:
-    with psycopg.connect(settings.database_url, prepare_threshold=None) as conn:
+    with connect() as conn:
         for i in range(count):
             question = SAMPLE_QUESTIONS[i % len(SAMPLE_QUESTIONS)]
             entry = append_event(
@@ -45,7 +45,7 @@ def cmd_append(count: int) -> None:
 
 
 def cmd_verify() -> None:
-    with psycopg.connect(settings.database_url, prepare_threshold=None) as conn:
+    with connect() as conn:
         result = verify_chain(conn)
     if result["ok"]:
         print(f"chain intact: {result['entries']} entries, head {result['head_hash'][:16]}…")
@@ -66,7 +66,7 @@ def _rewrite(conn: psycopg.Connection, seq: int, payload: dict, canonical: str) 
 def cmd_tamper(seq: int) -> None:
     if BACKUP_FILE.exists():
         raise SystemExit(f"{BACKUP_FILE.name} exists; run `restore` first")
-    with psycopg.connect(settings.migration_url) as conn:
+    with connect(pooled=False) as conn:
         row = conn.execute("SELECT payload, record_canonical FROM audit_log WHERE seq = %s", (seq,)).fetchone()
         if row is None:
             raise SystemExit(f"no entry #{seq}")
@@ -83,7 +83,7 @@ def cmd_restore() -> None:
     if not BACKUP_FILE.exists():
         raise SystemExit("nothing to restore")
     backup = json.loads(BACKUP_FILE.read_text())
-    with psycopg.connect(settings.migration_url) as conn:
+    with connect(pooled=False) as conn:
         _rewrite(conn, backup["seq"], backup["payload"], backup["record_canonical"])
     BACKUP_FILE.unlink()
     print(f"entry #{backup['seq']} restored")

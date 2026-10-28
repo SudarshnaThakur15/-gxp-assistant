@@ -19,8 +19,8 @@ import sys
 import psycopg
 
 from app.audit import append_event
-from app.config import settings
 from app.corpus import Source, load_and_validate
+from app.db import connect
 from app.embedding import EMBEDDING_MODEL, embed_passages, to_pgvector
 from app.parse import PARSERS, Section, parse
 
@@ -186,7 +186,7 @@ def main() -> None:
 
     summary = {"ingested": [], "metadata_updated": [], "unchanged": 0, "withdrawn": [], "rejected": [], "failed": []}
     # autocommit: each `conn.transaction()` block commits on its own (one transaction per document)
-    with psycopg.connect(settings.migration_url, autocommit=True) as conn:
+    with connect(pooled=False, autocommit=True) as conn:
         if not conn.execute("SELECT pg_try_advisory_lock(%s)", (LOCK_ID,)).fetchone()[0]:
             sys.exit("another ingestion run is in progress; try again when it finishes")
         known = existing_documents(conn)

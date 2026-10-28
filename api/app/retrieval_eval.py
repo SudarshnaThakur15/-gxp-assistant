@@ -7,11 +7,10 @@ documents (other client, superseded version) absent, and does the coarse
 "found" floor agree on not_found questions? Retrieval only; answers are judged later.
 """
 
-import psycopg
 import yaml
 
-from app.config import settings
 from app.corpus import REPO_ROOT
+from app.db import connect
 from app.retrieval import retrieve
 
 
@@ -23,7 +22,7 @@ def doc_key(ref: str) -> tuple[str, str | None]:
 def main() -> None:
     questions = yaml.safe_load((REPO_ROOT / "eval" / "golden.yaml").read_text())
     hit_needed = hit_got = leaks = 0
-    with psycopg.connect(settings.database_url, prepare_threshold=None) as conn:
+    with connect() as conn:
         for q in questions:
             r = retrieve(conn, q["persona"], q["question"])
             got = {(h.code, h.version) for h in r.hits}

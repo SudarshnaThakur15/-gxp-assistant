@@ -6,15 +6,13 @@ through PgBouncer.
 
 from pathlib import Path
 
-import psycopg
-
-from app.config import settings
+from app.db import connect
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 
 def main() -> None:
-    with psycopg.connect(settings.migration_url, autocommit=True) as conn:
+    with connect(pooled=False, autocommit=True) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS schema_migrations (
