@@ -1,11 +1,13 @@
-"""Hybrid retrieval with permission filtering before ranking.
+"""Gate 2, RETRIEVE: hybrid retrieval with permission filtering before ranking.
 
 One SQL round trip:
   - allowed chunks only (effective, persona's tenant or public, shared or persona's clients)
   - vector search + full-text search, fused with reciprocal rank fusion (RRF)
-  - at most MAX_PER_DOC chunks per document
+  - at most MAX_PER_DOC chunks per document; a document named in the question comes in whole
+    (up to MAX_NAMED_CHUNKS)
   - plus an exclusion trace: close matches that the filters removed, and why.
-    Other clients' documents are only counted, never named (naming them would leak).
+    Authorisation is checked first: anything the persona may not see is only counted,
+    never named (naming it would leak that it exists).
 """
 
 import re
@@ -13,23 +15,29 @@ import time
 from dataclasses import dataclass, field
 
 import psycopg
+from psycopg.rows import dict_row
 
 from app.corpus import DOC_REF
 from app.embedding import embed_query, to_pgvector
 
-TOP_K = 8           # chunks returned to the answer step
-CANDIDATES = 30     # per search arm, before fusion
+TOP_K = 5             # chunks returned to the answer step (kept small: free-tier LLM token limits)
+CANDIDATES = 30       # per search arm, before fusion
 MAX_PER_DOC = 2
+MAX_NAMED_CHUNKS = 10  # bound for documents named in the question (token budget)
 RRF_K = 60
-MIN_SIMILARITY = 0.70  # best vector similarity below this = "not found in approved documents" (tuned on eval/golden.yaml)
+MIN_SIMILARITY = 0.70  # best similarity below this = clearly off-topic → "not found" (can only make outcomes stricter)
 
 
 @dataclass
 class Hit:
     chunk_id: int
+    document_id: int
     code: str
     version: str
     title: str
+    doc_type: str
+    record_state: str | None
+    fingerprint: str | None
     section: str
     page: int | None
     text: str
@@ -37,6 +45,7 @@ class Hit:
     score: float
     regulatory_status: str | None
     required_qualifier: str | None
+    is_named: bool
 
 
 @dataclass
@@ -46,6 +55,11 @@ class Retrieval:
     best_similarity: float
     excluded: list[dict] = field(default_factory=list)
     ms: dict = field(default_factory=dict)
+
+
+def source_id(hit: Hit) -> str:
+    """Stable id the model uses to cite a passage in this request."""
+    return f"c{hit.chunk_id}"
 
 
 def keyword_query(question: str) -> str:
@@ -65,8 +79,7 @@ allowed AS (
        AND (c.client_id IS NULL OR c.client_id = ANY (p.client_ids))
 ),
 vec AS (
-    SELECT id, row_number() OVER (ORDER BY embedding <=> %(qv)s::vector) AS r,
-           1 - (embedding <=> %(qv)s::vector) AS sim
+    SELECT id, row_number() OVER (ORDER BY embedding <=> %(qv)s::vector) AS r
       FROM allowed ORDER BY embedding <=> %(qv)s::vector LIMIT %(n)s
 ),
 kw AS (
@@ -79,16 +92,18 @@ fused AS (
            coalesce(1.0 / (%(rrf)s + vec.r), 0) + coalesce(1.0 / (%(rrf)s + kw.r), 0) AS score
       FROM vec FULL JOIN kw ON vec.id = kw.id
 ),
-named AS (  -- documents the question names explicitly (e.g. "DEV-2026-019") are always included
-    SELECT a.id, 1.0 AS score FROM allowed a JOIN documents d ON d.id = a.document_id
-     WHERE d.code = ANY (%(codes)s)
+named AS (  -- documents the question names explicitly (e.g. "DEV-2026-019")
+    SELECT a.id FROM allowed a JOIN documents d ON d.id = a.document_id WHERE d.code = ANY (%(codes)s)
 ),
-scored AS (
-    SELECT id, sum(score) AS score FROM (SELECT * FROM fused UNION ALL SELECT * FROM named) s GROUP BY id
+candidates AS (
+    SELECT id, max(score) AS score FROM (
+        SELECT id, score FROM fused UNION ALL SELECT id, 0.0 FROM named
+    ) s GROUP BY id
 ),
 capped AS (
-    SELECT f.id, f.score, row_number() OVER (PARTITION BY c.document_id ORDER BY f.score DESC) AS per_doc
-      FROM scored f JOIN chunks c ON c.id = f.id
+    SELECT k.id, k.score, k.id IN (SELECT id FROM named) AS is_named,
+           row_number() OVER (PARTITION BY c.document_id ORDER BY k.score DESC, c.ordinal) AS per_doc
+      FROM candidates k JOIN chunks c ON c.id = k.id
 ),
 excluded AS (  -- close matches the filters removed
     SELECT c.id, c.document_id, c.status, c.client_id, c.tenant_id
@@ -98,41 +113,57 @@ excluded AS (  -- close matches the filters removed
                 AND (c.client_id IS NULL OR c.client_id = ANY (p.client_ids)))
      ORDER BY c.embedding <=> %(qv)s::vector LIMIT 10
 )
-SELECT 'hit', c.id, d.code, d.version, d.title, c.section_path, c.page, c.text,
-       1 - (c.embedding <=> %(qv)s::vector), k.score, d.regulatory_status, d.required_qualifier, NULL
+SELECT 'hit' AS kind, c.id AS chunk_id, c.document_id, d.code, d.version, d.title, d.doc_type, d.record_state,
+       d.fingerprint, c.section_path AS section, c.page, c.text,
+       1 - (c.embedding <=> %(qv)s::vector) AS similarity, k.score::float8 AS score,
+       d.regulatory_status, d.required_qualifier,
+       k.is_named, c.ordinal, NULL AS reason
   FROM capped k JOIN chunks c ON c.id = k.id JOIN documents d ON d.id = c.document_id
- WHERE k.per_doc <= %(cap)s
+ WHERE k.per_doc <= %(cap)s OR k.is_named
 UNION ALL
-SELECT 'excluded', e.id, d.code, d.version, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       CASE WHEN e.status <> 'effective' THEN e.status ELSE 'not authorised' END
+SELECT 'excluded', e.id, e.document_id, d.code, d.version, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL::float8, NULL, NULL, NULL, NULL,
+       CASE WHEN NOT (e.tenant_id IN (p.tenant_id, 'public')
+                      AND (e.client_id IS NULL OR e.client_id = ANY (p.client_ids)))
+            THEN 'not authorised'          -- authorisation first: never name what the persona may not see
+            ELSE e.status END
   FROM excluded e JOIN documents d ON d.id = e.document_id, persona p
 """
+
+HIT_FIELDS = list(Hit.__dataclass_fields__)
 
 
 def retrieve(conn: psycopg.Connection, persona: str, question: str) -> Retrieval:
     t0 = time.perf_counter()
     qv = to_pgvector(embed_query(question))
     t1 = time.perf_counter()
-    rows = conn.execute(SQL, {"persona": persona, "qv": qv, "kq": keyword_query(question),
-                              "n": CANDIDATES, "rrf": RRF_K, "cap": MAX_PER_DOC,
-                              "codes": DOC_REF.findall(question.upper())}).fetchall()
+    with conn.cursor(row_factory=dict_row) as cur:
+        rows = cur.execute(SQL, {"persona": persona, "qv": qv, "kq": keyword_query(question),
+                                 "n": CANDIDATES, "rrf": RRF_K, "cap": MAX_PER_DOC,
+                                 "codes": DOC_REF.findall(question.upper())}).fetchall()
     t2 = time.perf_counter()
 
-    hits = sorted((Hit(*r[1:12]) for r in rows if r[0] == "hit"), key=lambda h: h.score, reverse=True)[:TOP_K]
+    hit_rows = [r for r in rows if r["kind"] == "hit"]
+    named = sorted((r for r in hit_rows if r["is_named"]), key=lambda r: (r["code"], r["ordinal"]))[:MAX_NAMED_CHUNKS]
+    named_ids = {r["chunk_id"] for r in named}
+    ranked = sorted((r for r in hit_rows if r["chunk_id"] not in named_ids), key=lambda r: r["score"], reverse=True)
+    picked = named + ranked[:max(TOP_K - len(named), 0)]
+    hits = [Hit(**{k: r[k] for k in HIT_FIELDS}) for r in picked]
     best = max((h.similarity for h in hits), default=0.0)
 
     excluded, hidden = [], 0
     for r in rows:
-        if r[0] != "excluded":
+        if r["kind"] != "excluded":
             continue
-        if r[12] == "not authorised":
+        if r["reason"] == "not authorised":
             hidden += 1
-        else:
-            item = {"document": f"{r[2]} v{r[3]}", "reason": r[12]}
-            if item not in excluded:
-                excluded.append(item)
+        elif (item := {"document": f"{r['code']} v{r['version']}", "reason": r["reason"]}) not in excluded:
+            excluded.append(item)
     if hidden:
-        excluded.append({"document": None, "reason": f"{hidden} close passage(s) from documents you are not authorised to see"})
+        excluded.append({"document": None,
+                         "reason": f"{hidden} close passage(s) from documents you are not authorised to see"})
 
-    return Retrieval(hits, best >= MIN_SIMILARITY, round(best, 3), excluded,
+    # Named documents are explicit requests: being off-topic by similarity does not apply to them.
+    found = bool(named) or best >= MIN_SIMILARITY
+    return Retrieval(hits, found, round(float(best), 3), excluded,
                      {"embed": round((t1 - t0) * 1000), "query": round((t2 - t1) * 1000)})

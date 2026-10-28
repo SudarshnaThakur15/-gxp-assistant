@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     # Pooled URL for app traffic; direct (unpooled) URL for migrations.
     database_url: str
     database_url_unpooled: str | None = None
+    groq_api_key: str | None = None
 
     cors_origins: list[str] = ["http://localhost:3000"]
 

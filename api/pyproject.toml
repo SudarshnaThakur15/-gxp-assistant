@@ -9,6 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.162.0",
     "fastembed>=0.9.1",
+    "groq>=1.7.0",
     "pdfplumber>=0.11.10",
     "psycopg[binary,pool]>=3.3.6",
     "pydantic-settings>=2.16.1",
@@ -19,3 +20,8 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

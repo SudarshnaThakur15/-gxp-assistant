@@ -59,6 +59,32 @@ Ingestion re-embeds a document only when its file, parser or embedding model cha
 metadata-only change (e.g. a new review date in the DMS) updates the record without re-embedding.
 Every ingested document, metadata change, withdrawal, run summary, rejection and failure is written to the audit trail. Design notes and lessons: `docs/ingestion-lessons.md`.
 
+## Question pipeline: the 7 gates
+
+The AI generates; a deterministic Assurance Layer (`api/app/assurance.py`, no AI inside) verifies.
+Every question passes the same gates in the same order (`api/app/pipeline.py`):
+
+| Gate | What happens | Code |
+|---|---|---|
+| 1 Screen | Rules block prohibited decisions (S1 release/disposition, S2 classification, S3 root cause, S4 CAPA selection, S5 instruction override); the AI classifier runs only if no rule refused, and can only make the outcome stricter | `assurance.screen_rules`, `screening.py` |
+| 2 Retrieve | Approved, in-force versions the user may see; exclusion trace | `retrieval.py` |
+| 3 Generate | The AI drafts cited claims only, each with a verbatim quote | `answer.py` |
+| 4 Validate | V1–V9: claims present, citations retrieved, versions in force, quotes word for word, quotes substantive, numbers in source, no decision language, injected text not repeated, draft-guidance label | `assurance.validate` |
+| 5 Tier | T1 knowledge → release; T2 investigation or procedure requiring a person → hold for review; T3 prohibited → refuse | `assurance.tier` |
+| 6 Record | Hash-chained audit entry with inputs, outputs, gate results, rule-set version + fingerprint, prompt versions, model id, committed before release | `pipeline.ask` |
+| 7 Release | Released by rules / Held for review / Refused | `assurance.release`, `pipeline.public_view` |
+
+```bash
+cd api
+uv run pytest -q                        # Assurance Layer unit tests (no AI, no database)
+uv run python -m app.retrieval_eval     # retrieval only
+uv run python -m app.answer_eval        # all 7 gates over eval/golden.yaml (calls the model; several minutes)
+```
+
+`POST /ask {"persona", "question"}` runs the pipeline and returns only the public view: a draft
+held for review is never returned to the requester. If the audit entry cannot be written, the
+API returns 503 and nothing is released.
+
 ## Audit trail
 
 `audit_log` is append-only (UPDATE/DELETE/TRUNCATE are blocked by triggers) and

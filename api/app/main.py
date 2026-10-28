@@ -1,18 +1,17 @@
 import time
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
-from dataclasses import asdict
-
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.audit import verify_chain
-from app.retrieval import retrieve
 from app.config import settings
 from app.db import pool
+from app.pipeline import ask, public_view
+from app.retrieval import retrieve
 
 
 @asynccontextmanager
@@ -122,6 +121,22 @@ class RetrieveRequest(BaseModel):
 def retrieve_endpoint(req: RetrieveRequest) -> dict:
     with pool.connection() as conn:
         return asdict(retrieve(conn, req.persona, req.question))
+
+
+class AskRequest(BaseModel):
+    # Demo only: the persona comes from the request. Production must take the user from SSO.
+    persona: str = Field(max_length=64)
+    question: str = Field(min_length=3, max_length=1000)
+
+
+@app.post("/ask")
+def ask_endpoint(req: AskRequest) -> dict:
+    """All 7 gates; the audit record is committed before this returns anything."""
+    try:
+        with pool.connection() as conn:
+            return public_view(ask(conn, req.persona, req.question))
+    except Exception as e:  # e.g. the audit trail could not be written: release nothing
+        raise HTTPException(status_code=503, detail=f"Not released: {type(e).__name__}") from e
 
 
 @app.get("/audit/verify")
