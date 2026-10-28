@@ -9,11 +9,25 @@ entry if a QA Manager decided it. What a viewer may see depends on who they are:
     see the chain itself (sequence, actor, event, hashes) and verify it
 """
 
+import re
+
 import psycopg
 
 from app.review import manifestation, recorded_citations
 
 NOT_FOUND = "Not found in the approved documentation available to you."
+FAILURE = re.compile(r"((?:screening|generation) failed: \w+)")
+
+
+def public_reason(text: str | None) -> str | None:
+    """A failed AI step is shown by its error type only. Older runs recorded the provider's full
+    message here (it contains account details); the full text stays in the audit entry."""
+    m = FAILURE.match(text or "")
+    return m.group(1) if m else text
+
+
+def public_reasons(payload: dict) -> list[str]:
+    return [public_reason(r) for r in payload.get("reasons") or []]
 LABELS = {
     "released": "Released by rules", "not_found": "Released by rules: not found",
     "held": "Held for review", "approved": "Released after QA review",
@@ -59,7 +73,7 @@ def _model(payload: dict) -> str | None:
             or ((payload.get("screen") or {}).get("llm") or {}).get("model"))
 
 
-def _rows(conn: psycopg.Connection, viewer: str, seq: int | None = None) -> list[tuple]:
+def visible_rows(conn: psycopg.Connection, viewer: str, seq: int | None = None) -> list[tuple]:
     sql, params = RUNS_SQL, {"viewer": viewer}
     if seq is not None:
         sql, params = sql + " AND a.seq = %(seq)s", params | {"seq": seq}
@@ -69,11 +83,11 @@ def _rows(conn: psycopg.Connection, viewer: str, seq: int | None = None) -> list
 def list_runs(conn: psycopg.Connection, viewer: str, filter_: str | None = None) -> dict:
     """Runs visible to the viewer, newest first, with counts per filter."""
     runs = []
-    for seq, recorded_at, _, _, p, req_id, req_name, _, _, review in _rows(conn, viewer):
+    for seq, recorded_at, _, _, p, req_id, req_name, _, _, review in visible_rows(conn, viewer):
         o = outcome(p, review)
         runs.append({"seq": seq, "recorded_at": recorded_at, "question": p["question"],
                      "requested_by": {"id": req_id, "name": req_name}, "outcome": o, "label": LABELS[o],
-                     "tier": p["tier"], "reason": (p.get("reasons") or [None])[0], "model": _model(p),
+                     "tier": p["tier"], "reason": (public_reasons(p) or [None])[0], "model": _model(p),
                      "ruleset_version": p["ruleset"]["version"]})
     counts = {"all": len(runs)} | {f: sum(r["outcome"] in outs for r in runs) for f, outs in FILTERS.items()}
     if filter_ in FILTERS:
@@ -109,7 +123,7 @@ def _trace(seq: int, hash_: str, p: dict, label: str) -> list[dict]:
          "result": "skipped" if not checks else
          ("failed" if any(c["status"] == "fail" and c["severity"] == "hard" for c in checks) else "passed"),
          "summary": {"checks": len(checks), "failed": failed}},
-        {"n": 5, "gate": "Tier", "by": "rules", "result": p["tier"], "reasons": p.get("reasons", [])},
+        {"n": 5, "gate": "Tier", "by": "rules", "result": p["tier"], "reasons": public_reasons(p)},
         {"n": 6, "gate": "Record", "by": "rules", "result": "recorded", "audit_seq": seq, "audit_hash": hash_},
         {"n": 7, "gate": "Release", "by": "rules", "result": label},
     ]
@@ -125,7 +139,7 @@ def _event_text(event_type: str, payload: dict) -> str:
 
 def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
     """One run as this viewer may see it. None = not visible to them."""
-    rows = _rows(conn, viewer, seq)
+    rows = visible_rows(conn, viewer, seq)
     if not rows:
         return None
     seq, recorded_at, hash_, prev_hash, p, req_id, req_name, review_seq, review_hash, review = rows[0]
@@ -153,7 +167,7 @@ def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
         "seq": seq, "recorded_at": recorded_at, "hash": hash_, "prev_hash": prev_hash,
         "question": p["question"], "requested_by": {"id": req_id, "name": req_name},
         "outcome": o, "label": LABELS[o], "decision": p["decision"], "answer_type": p["answer_type"],
-        "tier": p["tier"], "reasons": p.get("reasons", []), "error": p.get("error"),
+        "tier": p["tier"], "reasons": public_reasons(p), "error": public_reason(p.get("error")),
         "answer": answer, "checks": checks, "trace": _trace(seq, hash_, p, LABELS[o]),
         "model": _model(p), "ruleset": p["ruleset"], "ms": p.get("ms", {}),
         "review": None if review is None else {
