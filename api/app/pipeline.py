@@ -207,7 +207,7 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
                        "min_similarity": retrieval.MIN_SIMILARITY},
             "found": r.found, "best_similarity": r.best_similarity, "excluded": r.excluded,
             "passages": [{"id": source_id(h), "doc": h.code, "version": h.version, "section": h.section,
-                          "document_fingerprint": h.fingerprint, "score": round(h.score, 5),
+                          "page": h.page, "document_fingerprint": h.fingerprint, "score": round(h.score, 5),
                           "injection_flagged": source_id(h) in injected} for h in hits]},
         "generation": None if gen_meta is None else gen_meta | {
             "prompt": {"version": answer.PROMPT_VERSION, "fingerprint": answer.PROMPT_FINGERPRINT}},

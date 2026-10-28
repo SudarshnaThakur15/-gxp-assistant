@@ -85,6 +85,34 @@ uv run python -m app.answer_eval        # all 7 gates over eval/golden.yaml (cal
 held for review is never returned to the requester. If the audit entry cannot be written, the
 API returns 503 and nothing is released.
 
+## QA review and electronic signature
+
+An answer held for review (tier T2) reaches its requester only after a QA Manager signs it
+(`app/review.py`). The audit log is the only record: the review queue is the list of held `ask`
+entries without a `review` entry, and each decision is a new audit entry.
+
+| Control (21 CFR Part 11 / EU GMP Annex 11) | How |
+|---|---|
+| Who may sign | `can_sign` users only; never on their own question; must have access to every cited document |
+| Identity at signing | Password re-entered for every signature; stored only as a scrypt hash |
+| Signature manifestation | Printed name, title, date and time (UTC) and meaning (approved / rejected + reason) |
+| Signature linked to the record | Stores the SHA-256 of the exact text and citations signed; a later change makes the answer refused |
+| Re-check before approval | Every cited version must still be in force with the same fingerprint |
+| Failed attempts | Every refused attempt is recorded; 3 wrong passwords in 15 minutes lock signing |
+| No editing | Approve or reject only; editing would bypass the validation checks |
+
+```bash
+cd api
+uv run python -m app.review_cli set-password qa-manager    # hidden prompt
+uv run python -m app.review_cli queue qa-manager
+uv run python -m app.review_cli sign 72 --as qa-manager --approve
+uv run python -m app.review_cli status 72 --as qa-analyst-a
+```
+
+API: `GET /reviews?persona=` (queue, signers only), `POST /reviews/{seq}`
+`{"persona", "decision": "approve" | "reject", "password", "reason"}`, and
+`GET /answers/{seq}?persona=` for the requester (the `receipt.audit_seq` returned by `/ask`).
+
 ## Audit trail
 
 `audit_log` is append-only (UPDATE/DELETE/TRUNCATE are blocked by triggers) and

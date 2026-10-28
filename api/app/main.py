@@ -12,6 +12,7 @@ from app.config import settings
 from app.db import pool
 from app.pipeline import ask, public_view
 from app.retrieval import retrieve
+from app.review import SignatureRefused, answer_status, decide, queue
 
 
 @asynccontextmanager
@@ -137,6 +138,49 @@ def ask_endpoint(req: AskRequest) -> dict:
             return public_view(ask(conn, req.persona, req.question))
     except Exception as e:  # e.g. the audit trail could not be written: release nothing
         raise HTTPException(status_code=503, detail=f"Not released: {type(e).__name__}") from e
+
+
+@app.get("/answers/{ask_seq}")
+def answer_endpoint(ask_seq: int, persona: str) -> dict:
+    """A held answer as its requester sees it: still held, released after QA signature, or rejected."""
+    with pool.connection() as conn:
+        status = answer_status(conn, persona, ask_seq)
+    if status is None:
+        raise HTTPException(status_code=404, detail="No held answer with this number is visible to you.")
+    return status
+
+
+@app.get("/reviews")
+def review_queue(persona: str) -> list[dict]:
+    """Held answers waiting for this signer's decision."""
+    with pool.connection() as conn:
+        try:
+            return queue(conn, persona)
+        except SignatureRefused as e:
+            raise HTTPException(status_code=e.status, detail=str(e)) from e
+
+
+class SignRequest(BaseModel):
+    # Demo only: the signer comes from the request. Production must take the user from SSO.
+    persona: str = Field(max_length=64)
+    decision: str = Field(pattern="^(approve|reject)$")
+    password: str = Field(min_length=1, max_length=200, repr=False)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+@app.post("/reviews/{ask_seq}")
+def sign_endpoint(ask_seq: int, req: SignRequest) -> dict:
+    """Electronic signature: approve or reject a held answer. Refused attempts are recorded too."""
+    with pool.connection() as conn:
+        try:
+            result = decide(conn, req.persona, ask_seq, req.decision, req.password, req.reason)
+        except SignatureRefused as e:
+            conn.commit()
+            raise HTTPException(status_code=e.status, detail={"code": e.code, "message": str(e)}) from e
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        conn.commit()
+    return result
 
 
 @app.get("/audit/verify")
