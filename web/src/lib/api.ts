@@ -46,7 +46,7 @@ export type Persona = {
   id: string;
   name: string;
   title: string;
-  role: "qa_analyst" | "qa_manager";
+  role: "qa_analyst" | "qa_manager" | "auditor";
   can_sign: boolean;
   organisation: string;
   clients: string[];
@@ -84,6 +84,7 @@ export type RunSummary = {
   seq: number;
   recorded_at: string;
   question: string;
+  test: boolean;
   requested_by: { id: string; name: string };
   outcome: Outcome;
   label: string;
@@ -147,6 +148,7 @@ export type RunDetail = {
   hash: string;
   prev_hash: string;
   question: string;
+  test: boolean;
   requested_by: { id: string; name: string };
   outcome: Outcome;
   label: string;
@@ -227,6 +229,7 @@ export const verifyAudit = () => getJson<AuditVerification>("/audit/verify");
 export const getRuns = (persona: string, filter?: string) =>
   getJson<RunList>(`/runs?persona=${q(persona)}${filter ? `&filter=${q(filter)}` : ""}`);
 export const getRun = (persona: string, seq: number) => getJson<RunDetail>(`/runs/${seq}?persona=${q(persona)}`);
+export const getReviewCount = (persona: string) => getJson<{ waiting: number }>(`/reviews/count?persona=${q(persona)}`);
 export const getQueue = (persona: string) => getJson<QueueItem[]>(`/reviews?persona=${q(persona)}`);
 export const getAudit = (persona: string, limit: number, before?: number) =>
   getJson<AuditEntry[]>(`/audit?persona=${q(persona)}&limit=${limit}${before ? `&before=${before}` : ""}`);

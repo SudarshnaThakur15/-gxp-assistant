@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { Suspense } from "react";
 
-import { ErrorNote, Mono, PageHeader, sectionAnchor, Skeleton, StatusPill } from "@/components/ui";
+import { DocText, ErrorNote, Mono, sectionAnchor, Skeleton, StatusPill } from "@/components/ui";
 import { getDocument, settle } from "@/lib/api";
 import { getCurrentPersona } from "@/lib/persona";
 
 export default function DocumentPage(props: PageProps<"/documents/[code]">) {
   return (
     <>
-      <Link href="/documents" className="text-sm text-zinc-600 hover:underline">← Document library</Link>
+      <Link href="/documents" className="text-sm text-muted hover:underline">← Document library</Link>
       <Suspense fallback={<Skeleton lines={5} />}>
         <Document params={props.params} searchParams={props.searchParams} />
       </Suspense>
@@ -33,32 +33,38 @@ async function Document({ params, searchParams }: {
 
   return (
     <>
-      <PageHeader eyebrow={`${d.code} · version ${d.version}`} title={d.title} />
-      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600">
-        <StatusPill status={d.status} regulatory={d.regulatory_status} />
-        {d.effective_date && <span>Effective {d.effective_date}</span>}
-        {d.owner && <span>· Owner: {d.owner}</span>}
-        {d.record_state && <span>· Record {d.record_state}</span>}
-        <span>· Source: {d.source_format}</span>
-        {d.fingerprint && <span>· Fingerprint <Mono>{d.fingerprint.slice(0, 12)}</Mono></span>}
-      </div>
+      <header className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+          <Mono className="font-semibold text-brand-text">{d.code}</Mono>
+          <span>Version {d.version}</span>
+          {d.effective_date && <span>Effective {d.effective_date}</span>}
+          {d.owner && <span>Owner: {d.owner}</span>}
+          <StatusPill status={d.status} regulatory={d.regulatory_status} />
+        </div>
+        <h1 className="text-3xl font-extrabold leading-tight">{d.title}</h1>
+        <p className="text-sm text-faint">
+          {d.regulatory_status ? "Official published text" : "Fictional document for the demonstration"} · source {d.source_format}
+          {d.record_state && ` · record ${d.record_state}`}
+          {d.fingerprint && <> · fingerprint <Mono>{d.fingerprint.slice(0, 12)}</Mono></>}
+        </p>
+      </header>
       {d.status !== "effective" && (
-        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p className="rounded-xl border border-wait/40 bg-wait-bg px-4 py-3 text-sm text-wait-text">
           This version is {d.status}. It is kept for the record and is never quoted in an answer.
         </p>
       )}
       {d.required_qualifier && (
-        <p className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+        <p className="rounded-xl border border-brand/30 bg-brand-soft px-4 py-3 text-sm text-brand-text">
           Every answer citing this document carries, by rule: “{d.required_qualifier}”
         </p>
       )}
       {d.versions.length > 1 && (
         <nav className="flex flex-wrap items-center gap-2 text-sm" aria-label="Versions">
-          <span className="text-zinc-500">Versions:</span>
+          <span className="text-faint">Versions:</span>
           {d.versions.map((ver) => (
             <Link key={ver.version} href={`/documents/${encodeURIComponent(d.code)}?v=${encodeURIComponent(ver.version)}`}
               aria-current={ver.version === d.version ? "page" : undefined}
-              className={`rounded-full px-3 py-0.5 ring-1 ring-inset ${ver.version === d.version ? "bg-zinc-900 text-white ring-zinc-900" : "bg-white text-zinc-700 ring-zinc-300"}`}>
+              className={`rounded-full px-3 py-0.5 ring-1 ring-inset ${ver.version === d.version ? "bg-ink text-white ring-ink" : "bg-white text-body ring-line"}`}>
               v{ver.version} · {ver.status === "effective" ? "in force" : ver.status}
             </Link>
           ))}
@@ -67,12 +73,19 @@ async function Document({ params, searchParams }: {
       <div className="flex flex-col gap-3">
         {d.sections.map((s) => (
           <section key={s.path} id={sectionAnchor(s.path)}
-            className="scroll-mt-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm target:border-amber-400 target:ring-2 target:ring-amber-200">
-            <h2 className="mb-2 flex flex-wrap items-baseline gap-2 text-base font-semibold text-zinc-900">
-              <a href={`#${sectionAnchor(s.path)}`} className="hover:underline">§ {s.path}</a>
-              {s.page != null && <span className="text-xs font-normal text-zinc-500">page {s.page}</span>}
+            className="scroll-mt-6 rounded-card border border-line bg-white p-5 shadow-card target:border-brand target:ring-2 target:ring-brand/30">
+            <h2 className="mb-2 flex flex-wrap items-baseline gap-2 text-lg font-semibold">
+              <a href={`#${sectionAnchor(s.path)}`} className="flex items-baseline gap-2 hover:underline">
+                {/^\d+(\.\d+)*\s/.test(s.path) ? (
+                  <>
+                    <Mono className="text-[0.95rem] font-medium text-brand-text">§{s.path.split(" ")[0]}</Mono>
+                    {s.path.split(" ").slice(1).join(" ")}
+                  </>
+                ) : s.path}
+              </a>
+              {s.page != null && <span className="text-xs font-normal text-faint">page {s.page}</span>}
             </h2>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-800">{s.text}</p>
+            <DocText text={s.text} />
           </section>
         ))}
       </div>

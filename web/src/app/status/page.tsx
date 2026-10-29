@@ -10,10 +10,10 @@ export default function StatusPage() {
       <PageHeader eyebrow="System status" title="Database and audit trail, checked live.">
         Every value below is measured when this page loads.
       </PageHeader>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Checking database…</p>}>
+      <Suspense fallback={<p className="text-sm text-faint">Checking database…</p>}>
         <DbStatus />
       </Suspense>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Verifying audit trail…</p>}>
+      <Suspense fallback={<p className="text-sm text-faint">Verifying audit trail…</p>}>
         <AuditStatus />
       </Suspense>
     </div>
@@ -23,7 +23,7 @@ export default function StatusPage() {
 function Alert({ tone, children }: { tone: "ok" | "error"; children: React.ReactNode }) {
   const styles =
     tone === "ok"
-      ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+      ? "border-ok/40 bg-ok-bg text-ok-text"
       : "border-red-300 bg-red-50 text-red-700";
   return <p className={`rounded-lg border px-4 py-2 text-sm ${styles}`}>{children}</p>;
 }
@@ -44,10 +44,10 @@ async function DbStatus() {
     ["Latency", `${db.latency_ms} ms`],
   ];
   return (
-    <dl className="divide-y divide-zinc-200 rounded-2xl border border-zinc-200 bg-white">
+    <dl className="divide-y divide-line-soft rounded-card border border-line bg-white">
       {rows.map(([label, value]) => (
         <div key={label} className="flex justify-between gap-4 px-4 py-2 text-sm">
-          <dt className="text-zinc-500">{label}</dt>
+          <dt className="text-faint">{label}</dt>
           <dd className="font-mono">{value}</dd>
         </div>
       ))}

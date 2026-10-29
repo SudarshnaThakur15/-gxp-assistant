@@ -35,26 +35,21 @@ npm run build     # web production build + API compile check
 
 ## Web interface
 
-The persona switcher in the sidebar stands in for sign-in. Every screen reads from the API, and
-the API builds every view from the audit log.
+The persona switcher in the sidebar stands in for sign-in. Each role gets its own menu and home
+screen (segregation of duties), and the API enforces the same rules:
 
-| Page | What it shows |
-|---|---|
-| `/` Console | Ask a question; live counts; answers waiting for your signature; recent questions |
-| `/runs`, `/runs/{n}` | Every run with filters; one run's answer, reasons, 11 checks, 7-gate trace, signature and history |
-| `/runs/{n}/evidence` | Printable inspection evidence pack assembled from the audit trail |
-| `/reviews` | Held answers with the electronic signature form (QA Managers) |
-| `/how-it-works` | The 7 gates, who decides each, live counts |
-| `/assurance` | Every rule in plain English, rule-set fingerprint, failures recorded, and the assurance lab: bad drafts run live through the rules (no AI) |
-| `/documents`, `/documents/{code}` | Controlled documents and versions; citations link to the exact section |
-| `/audit` | Chain verification, every entry, CSV export (entry contents for QA Managers only) |
-| `/proof` | The saved golden-set evaluation (`answer_eval --save`): expected vs actual outcome, unsafe releases; adjustable ROI model |
-| `/trust` | Data boundary (the AI model host is external), safeguards with live checks, recent AI calls |
-| `/sources` | The three document sources and the last import, including rejected files |
+| Role | Home | Can do | Sees |
+|---|---|---|---|
+| QA Analyst (Alex Morgan, Sam Rivera) | Ask: chat-style, past questions on the left | Ask questions | Only their own questions; a held answer once QA signs it |
+| QA Manager (Jordan Lee) | Review inbox | Ask, approve or reject held answers with an electronic signature | Questions from the programmes they cover, including held drafts |
+| Auditor (Taylor Brooks) | Overview | Nothing: read-only, cannot ask or sign | Every question, draft and audit entry, automated test runs labelled |
 
-What a persona sees is enforced by the API, not the page: requesters see their own runs, a QA
-Manager sees the runs of the programmes they cover, and withheld drafts and entry contents are
-shown only to signers.
+Every answer shows a plain status line and the answer first; the proof sits in tabs: Answer ·
+Sources · Checks · How it ran · Record. Other pages: `/runs` (questions with filters),
+`/runs/{n}/evidence` (printable evidence pack), `/documents` (citations link to the exact section),
+`/how-it-works`, and for auditors `/audit`, `/assurance` (rules + live lab), `/trust`, `/proof`,
+`/sources`, `/status`. The automated evaluation asks as dedicated test accounts
+(`test-analyst-a`, `test-analyst-b`), never as a real person.
 
 ## Knowledge base
 

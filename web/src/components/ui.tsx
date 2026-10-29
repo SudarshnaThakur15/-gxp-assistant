@@ -1,13 +1,19 @@
 import Link from "next/link";
 
 import type { Check, Citation, Outcome } from "@/lib/api";
+import { CHECK_PLAIN, SHORT, STATUS, type Tone } from "@/lib/plain";
+import { LinkPending } from "@/components/pending";
+
+export function Eyebrow({ children }: { children: React.ReactNode }) {
+  return <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-text">{children}</p>;
+}
 
 export function PageHeader({ eyebrow, title, children }: { eyebrow: string; title: string; children?: React.ReactNode }) {
   return (
     <header className="flex flex-col gap-2">
-      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{eyebrow}</p>
-      <h1 className="text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl">{title}</h1>
-      {children && <p className="max-w-3xl text-sm text-zinc-600">{children}</p>}
+      <Eyebrow>{eyebrow}</Eyebrow>
+      <h1 className="max-w-3xl text-3xl font-extrabold leading-[1.08] sm:text-4xl">{title}</h1>
+      {children && <p className="max-w-2xl text-[15px] leading-relaxed text-muted">{children}</p>}
     </header>
   );
 }
@@ -19,10 +25,10 @@ export function Card({ title, aside, children, className = "" }: {
   className?: string;
 }) {
   return (
-    <section className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm ${className}`}>
+    <section className={`rounded-card border border-line bg-white p-5 shadow-card sm:p-6 ${className}`}>
       {(title || aside) && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          {title && <h2 className="text-base font-semibold text-zinc-900">{title}</h2>}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          {title && <h2 className="text-lg font-semibold">{title}</h2>}
           {aside}
         </div>
       )}
@@ -31,24 +37,23 @@ export function Card({ title, aside, children, className = "" }: {
   );
 }
 
-const OUTCOME_TONE: Record<Outcome, string> = {
-  released: "bg-emerald-50 text-emerald-800 ring-emerald-200",
-  not_found: "bg-sky-50 text-sky-800 ring-sky-200",
-  held: "bg-amber-50 text-amber-800 ring-amber-200",
-  approved: "bg-emerald-50 text-emerald-800 ring-emerald-200",
-  rejected: "bg-rose-50 text-rose-800 ring-rose-200",
-  refused: "bg-rose-50 text-rose-800 ring-rose-200",
+export const TONE_PILL: Record<Tone, string> = {
+  ok: "bg-ok-bg text-ok-text",
+  wait: "bg-wait-bg text-wait-text",
+  fail: "bg-fail-bg text-fail-text",
+  info: "bg-brand-soft text-brand-text",
 };
 
-export function OutcomePill({ outcome, label }: { outcome: Outcome; label: string }) {
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${OUTCOME_TONE[outcome]}`}>
-      {label}
-    </span>
-  );
+export function Pill({ tone, children, className = "" }: { tone: Tone | "neutral"; children: React.ReactNode; className?: string }) {
+  const cls = tone === "neutral" ? "bg-sunken text-muted" : TONE_PILL[tone];
+  return <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls} ${className}`}>{children}</span>;
 }
 
-// Map a public decision (from POST /ask) onto the outcome colours.
+export function OutcomePill({ outcome, label }: { outcome: Outcome; label?: string }) {
+  return <Pill tone={STATUS[outcome].tone}>{label ?? SHORT[outcome]}</Pill>;
+}
+
+// Map a public decision (from POST /ask) onto an outcome.
 export function decisionOutcome(decision: string, answerType: string): Outcome {
   if (decision === "held_for_review") return "held";
   if (decision === "refused") return "refused";
@@ -63,7 +68,7 @@ export function TierChip({ tier }: { tier: string }) {
   };
   return (
     <span title={title[tier] ?? "No tier: the request failed safely"}
-      className="rounded-md bg-zinc-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-zinc-700">
+      className="rounded-md bg-sunken px-1.5 py-0.5 font-mono text-xs font-semibold text-muted">
       {tier}
     </span>
   );
@@ -72,24 +77,10 @@ export function TierChip({ tier }: { tier: string }) {
 // Every step says who decided it: the AI, or fixed rules with no AI inside.
 export function ByBadge({ by, model }: { by: string; model?: string | null }) {
   if (by === "AI") {
-    return (
-      <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-800 ring-1 ring-inset ring-violet-200">
-        AI{model ? ` · ${model}` : ""}
-      </span>
-    );
+    return <Pill tone="wait" className="uppercase tracking-wide">AI{model ? ` · ${model}` : ""}</Pill>;
   }
-  if (by.includes("AI")) {
-    return (
-      <span className="rounded-full bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-200">
-        Rules + AI (stricter wins)
-      </span>
-    );
-  }
-  return (
-    <span className="rounded-full bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-200">
-      Rules · no AI
-    </span>
-  );
+  if (by.includes("AI")) return <Pill tone="neutral">Rules + AI · stricter wins</Pill>;
+  return <Pill tone="neutral">Rules · no AI</Pill>;
 }
 
 export function Mono({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -111,58 +102,61 @@ export function citationHref(c: Pick<Citation, "doc" | "version" | "section">) {
 
 export function CitationChip({ c }: { c: Pick<Citation, "doc" | "version" | "section"> }) {
   return (
-    <Link href={citationHref(c)} className="rounded-md bg-zinc-100 px-1.5 py-0.5 font-mono text-[0.8rem] text-zinc-800 hover:bg-zinc-200 hover:underline">
+    <Link href={citationHref(c)}
+      className="rounded-md bg-brand-soft px-1.5 py-0.5 font-mono text-[0.8rem] font-medium text-brand-text transition-colors hover:bg-brand-tint">
       {citationRef(c)}
     </Link>
   );
 }
 
+export function Quote({ children }: { children: React.ReactNode }) {
+  return (
+    <blockquote className="rounded-r-md border-l-[3px] border-brand bg-page px-3 py-2 text-sm leading-relaxed text-body">
+      “{children}”
+    </blockquote>
+  );
+}
+
 export function Citations({ citations }: { citations: Citation[] }) {
   return (
-    <ol className="flex flex-col gap-3">
+    <ol className="flex flex-col gap-4">
       {citations.map((c) => (
-        <li key={c.n} className="flex flex-col gap-1.5">
+        <li key={c.n} className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-semibold text-zinc-500">[{c.n}]</span>
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-ink px-1 text-[11px] font-semibold text-white">{c.n}</span>
             <CitationChip c={c} />
-            {c.page != null && <span className="text-xs text-zinc-500">page {c.page}</span>}
+            {c.page != null && <span className="text-xs text-faint">page {c.page}</span>}
           </div>
-          {c.quotes.map((quote) => (
-            <blockquote key={quote} className="border-l-4 border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-              “{quote}”
-            </blockquote>
-          ))}
+          {c.quotes.map((quote) => <Quote key={quote}>{quote}</Quote>)}
         </li>
       ))}
     </ol>
   );
 }
 
-const CHECK_ICON: Record<Check["status"], { icon: string; tone: string; label: string }> = {
-  pass: { icon: "✓", tone: "text-emerald-700", label: "passed" },
-  fail: { icon: "✕", tone: "text-rose-700", label: "failed" },
-  fixed: { icon: "✎", tone: "text-sky-700", label: "fixed by rule" },
-  skip: { icon: "–", tone: "text-zinc-400", label: "not applicable" },
+const CHECK_ICON: Record<Check["status"], { icon: string; cls: string; label: string }> = {
+  pass: { icon: "✓", cls: "bg-ok-bg text-ok-text", label: "passed" },
+  fail: { icon: "✕", cls: "bg-fail-bg text-fail-text", label: "failed" },
+  fixed: { icon: "✎", cls: "bg-brand-soft text-brand-text", label: "fixed by a rule" },
+  skip: { icon: "–", cls: "bg-sunken text-faint", label: "not applicable" },
 };
 
 export function CheckList({ checks }: { checks: Check[] }) {
   return (
-    <ul className="divide-y divide-zinc-100">
+    <ul className="divide-y divide-line-soft">
       {checks.map((c) => {
         const s = CHECK_ICON[c.status];
         return (
-          <li key={c.id} className="flex gap-3 py-2 text-sm">
-            <span className={`w-4 shrink-0 font-bold ${s.tone}`} aria-label={s.label}>{s.icon}</span>
+          <li key={c.id} className="flex gap-3 py-2.5 text-sm">
+            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.cls}`} aria-label={s.label}>{s.icon}</span>
             <div className="flex min-w-0 flex-col gap-0.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Mono className="font-semibold text-zinc-800">{c.id}</Mono>
-                <span className="text-zinc-800">{c.title}</span>
-                <span className={`rounded px-1.5 text-[0.7rem] font-medium uppercase tracking-wide ${
-                  c.severity === "hard" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>
-                  {c.severity === "hard" ? "blocking" : "review"}
-                </span>
-              </div>
-              {c.detail && <p className="break-words text-xs text-zinc-500">{c.detail}</p>}
+              <p className="text-strong">{CHECK_PLAIN[c.id] ?? c.title}</p>
+              <p className="flex flex-wrap items-center gap-2 text-xs text-faint">
+                <Mono>{c.id}</Mono>
+                <span>{c.severity === "hard" ? "blocking: a failure refuses the answer" : "review: a failure holds it for QA"}</span>
+                {c.status === "fixed" && <span className="text-brand-text">fixed by a rule</span>}
+              </p>
+              {c.detail && <p className="break-words text-xs text-muted">{c.detail}</p>}
             </div>
           </li>
         );
@@ -172,18 +166,18 @@ export function CheckList({ checks }: { checks: Check[] }) {
 }
 
 export function EmptyState({ children }: { children: React.ReactNode }) {
-  return <p className="rounded-xl border border-dashed border-zinc-300 px-4 py-6 text-center text-sm text-zinc-500">{children}</p>;
+  return <div className="rounded-card border border-dashed border-line bg-white/60 px-5 py-8 text-center text-sm text-muted">{children}</div>;
 }
 
 export function ErrorNote({ children }: { children: React.ReactNode }) {
-  return <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{children}</p>;
+  return <p className="rounded-card border border-fail/30 bg-fail-bg px-4 py-3 text-sm text-fail-text">{children}</p>;
 }
 
 export function Skeleton({ lines = 3 }: { lines?: number }) {
   return (
     <div className="flex animate-pulse flex-col gap-3" aria-label="Loading">
       {Array.from({ length: lines }, (_, i) => (
-        <div key={i} className="h-16 rounded-2xl bg-zinc-200/70" />
+        <div key={i} className="h-16 rounded-card bg-sunken" />
       ))}
     </div>
   );
@@ -191,7 +185,8 @@ export function Skeleton({ lines = 3 }: { lines?: number }) {
 
 export function RunLink({ seq, children }: { seq: number; children: React.ReactNode }) {
   return (
-    <Link href={`/runs/${seq}`} className="font-medium text-zinc-900 underline-offset-2 hover:underline">
+    <Link href={`/runs/${seq}`} className="font-medium text-strong underline-offset-2 hover:text-brand-text hover:underline">
+      <LinkPending />
       {children}
     </Link>
   );
@@ -205,12 +200,55 @@ export function formatTime(iso: string) {
 
 // Document status: in force, superseded, or draft guidance from a regulator.
 export function StatusPill({ status, regulatory }: { status: string; regulatory?: string | null }) {
-  if (regulatory === "consultation_draft") {
-    return <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800 ring-1 ring-inset ring-sky-200">Draft guidance</span>;
+  if (regulatory === "consultation_draft") return <Pill tone="info">Draft guidance</Pill>;
+  if (status === "effective") return <Pill tone="ok">In force</Pill>;
+  return <Pill tone="neutral">{status.charAt(0).toUpperCase() + status.slice(1)}</Pill>;
+}
+
+export function Stat({ value, label, caption, tone }: { value: React.ReactNode; label: string; caption?: string; tone?: Tone }) {
+  const highlight = tone === "wait" ? "border-wait/40 bg-wait-bg/50" : "border-line bg-white";
+  return (
+    <div className={`flex flex-col gap-0.5 rounded-card border p-4 shadow-card ${highlight}`}>
+      <p className="text-sm text-muted">{label}</p>
+      <p className={`font-display text-3xl font-extrabold ${tone === "ok" ? "text-ok-text" : "text-strong"}`}>{value}</p>
+      {caption && <p className="text-xs text-faint">{caption}</p>}
+    </div>
+  );
+}
+
+// Document text as written in the controlled source: bold, bullet lists and tables, nothing else.
+function inline(text: string) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") ? <strong key={i} className="font-semibold text-strong">{part.slice(2, -2)}</strong> : part);
+}
+
+export function DocText({ text }: { text: string }) {
+  const blocks: React.ReactNode[] = [];
+  let list: string[] = [];
+  let table: string[][] = [];
+  const flush = () => {
+    if (list.length) blocks.push(<ul key={blocks.length} className="list-disc pl-5">{list.map((l, i) => <li key={i}>{inline(l)}</li>)}</ul>);
+    if (table.length) {
+      blocks.push(
+        <div key={blocks.length} className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <tbody className="divide-y divide-line-soft">
+              {table.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j} className={`py-1.5 pr-4 ${i === 0 ? "font-semibold text-strong" : ""}`}>{inline(cell)}</td>)}</tr>)}
+            </tbody>
+          </table>
+        </div>,
+      );
+    }
+    list = []; table = [];
+  };
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (/^[-*]\s+/.test(t)) { if (table.length) flush(); list.push(t.replace(/^[-*]\s+/, "")); }
+    else if (t.startsWith("|")) {
+      if (list.length) flush();
+      if (!/^\|[\s:|-]+\|$/.test(t)) table.push(t.replace(/^\||\|$/g, "").split("|").map((c) => c.trim()));
+    } else { flush(); if (t) blocks.push(<p key={blocks.length}>{inline(t)}</p>); }
   }
-  const tone = status === "effective"
-    ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
-    : "bg-zinc-100 text-zinc-600 ring-zinc-200";
-  const label = status === "effective" ? "In force" : status.charAt(0).toUpperCase() + status.slice(1);
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tone}`}>{label}</span>;
+  flush();
+  return <div className="flex flex-col gap-2 text-[15px] leading-relaxed text-body">{blocks}</div>;
 }

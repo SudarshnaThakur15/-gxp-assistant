@@ -1,74 +1,72 @@
+import { MobileMenu } from "@/components/mobile-menu";
 import { NavLinks } from "@/components/nav-links";
 import { PersonaSwitcher } from "@/components/persona-switcher";
-import { settle } from "@/lib/api";
+import { getReviewCount, settle } from "@/lib/api";
 import { getCurrentPersona } from "@/lib/persona";
 import { AI_MODEL } from "@/lib/site";
 
-const ROLE_NOTE = {
-  qa_analyst: "Asks questions. Sees only their own runs; a held answer reaches them after a QA Manager signs it.",
-  qa_manager: "Reviews and e-signs held answers, and sees the runs of every programme they cover.",
+const ROLE = {
+  qa_analyst: { label: "QA Analyst", note: "Asks questions and sees only their own. A held answer reaches them after QA signs it." },
+  qa_manager: { label: "QA Manager", note: "Reviews and e-signs held answers for the programmes they cover." },
+  auditor: { label: "Auditor · read-only", note: "Sees every question, answer and audit entry. Cannot ask or sign." },
 };
 
 function Brand() {
   return (
     <div>
-      <p className="text-base font-bold tracking-tight text-zinc-900">GxP Knowledge Assistant</p>
-      <p className="text-xs text-zinc-500">Assurance demo · AI proposes, rules decide, people sign</p>
+      <p className="font-display text-lg font-extrabold leading-tight tracking-tight text-white">GxP Knowledge Assistant</p>
+      <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-white/60">Assurance demo</p>
     </div>
   );
 }
 
-const FOOTER = `Synthetic documents and people. Real AI model (${AI_MODEL} on Groq). Not a validated system.`;
+const FOOTER = `Fictional documents and people. Real AI model (${AI_MODEL} on Groq). Not a validated system.`;
 
-async function ViewingAs() {
+export async function Sidebar() {
   const { data, error } = await settle(getCurrentPersona());
   if (!data) {
-    return <p className="rounded-xl bg-rose-50 p-3 text-xs text-rose-800">API unreachable: {error}</p>;
+    return (
+      <aside className="bg-ink p-4 text-sm text-white lg:w-[264px] lg:shrink-0">
+        <Brand />
+        <p className="mt-4 rounded-lg bg-fail-bg p-3 text-fail-text">API unreachable: {error}</p>
+      </aside>
+    );
   }
   const { current, all } = data;
-  return (
-    <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-      <p className="text-[0.7rem] font-semibold uppercase tracking-wider text-zinc-400">Viewing as</p>
+  const role = ROLE[current.role];
+  const count = current.can_sign ? await settle(getReviewCount(current.id)) : null;
+  const waiting = count?.data?.waiting ?? 0;
+
+  const viewingAs = (
+    <div className="flex flex-col gap-2.5 rounded-xl border border-ink-line p-3.5">
+      <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/55">Viewing as</p>
       <div>
-        <p className="text-sm font-semibold text-zinc-900">{current.name}</p>
-        <p className="text-xs text-zinc-600">{current.title}</p>
+        <p className="font-medium text-white">{current.name}</p>
+        <p className="text-sm text-white/70">{role.label}</p>
       </div>
-      <p className="text-xs text-zinc-600">{ROLE_NOTE[current.role]}</p>
-      <p className="text-xs text-zinc-500">
-        {current.organisation} · {current.clients.join(", ")}
-        {current.can_sign && " · can e-sign"}
-      </p>
+      <p className="text-[13px] leading-snug text-white/65">{role.note}</p>
+      <p className="text-xs text-white/50">{current.clients.join(" · ")}</p>
       <PersonaSwitcher key={current.id} personas={all} currentId={current.id} />
     </div>
   );
-}
+  const nav = <NavLinks role={current.role} waiting={waiting} />;
 
-export async function Sidebar() {
-  const viewingAs = await ViewingAs();
   return (
-    <aside className="border-b border-zinc-200 bg-white print:hidden lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-r">
-      {/* Phone and tablet: brand + a menu that opens */}
-      <details className="group px-4 py-3 lg:hidden">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-          <Brand />
-          <span className="rounded-lg border border-zinc-300 px-2.5 py-1 text-sm text-zinc-700">Menu</span>
-        </summary>
-        <div className="mt-4 flex flex-col gap-5 pb-2">
-          {viewingAs}
-          <NavLinks />
-        </div>
-      </details>
-      {/* Desktop: always open */}
-      <div className="hidden h-full flex-col gap-6 p-5 lg:flex">
+    <aside className="bg-ink text-white print:hidden lg:sticky lg:top-0 lg:h-screen lg:w-[264px] lg:shrink-0 lg:overflow-y-auto">
+      <MobileMenu brand={<Brand />} who={`${current.name} · ${role.label}`}>
+        {viewingAs}
+        {nav}
+      </MobileMenu>
+      <div className="hidden h-full flex-col gap-7 px-4 py-6 lg:flex">
         <Brand />
         {viewingAs}
-        <NavLinks />
-        <p className="mt-auto text-xs text-zinc-400">{FOOTER}</p>
+        {nav}
+        <p className="mt-auto text-xs leading-relaxed text-white/45">{FOOTER}</p>
       </div>
     </aside>
   );
 }
 
 export function SidebarFallback() {
-  return <aside className="h-16 border-b border-zinc-200 bg-white lg:h-screen lg:w-72 lg:border-b-0 lg:border-r" />;
+  return <aside className="h-14 bg-ink lg:h-screen lg:w-[264px] lg:shrink-0" />;
 }

@@ -76,17 +76,17 @@ async function Gates() {
             <Card>
               <div className="flex flex-col gap-2 md:flex-row md:gap-6">
                 <div className="flex shrink-0 items-start gap-3 md:w-48">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-900 text-sm font-bold text-white">{i + 1}</span>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-sm font-bold text-white">{i + 1}</span>
                   <div className="flex flex-col gap-1">
-                    <p className="font-semibold text-zinc-900">{g.name}</p>
+                    <p className="font-semibold text-strong">{g.name}</p>
                     <ByBadge by={g.by === "AI" ? "AI" : g.by} />
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5 text-sm">
-                  <p className="text-zinc-800">{g.what}</p>
-                  <p className="text-zinc-600"><span className="font-medium text-zinc-800">Who decides:</span> {g.who}</p>
-                  <p className="text-xs text-zinc-500">Live: {g.live}</p>
-                  <Link href={g.link[0]} className="text-xs font-medium text-zinc-800 underline underline-offset-2">{g.link[1]} →</Link>
+                  <p className="text-strong">{g.what}</p>
+                  <p className="text-muted"><span className="font-medium text-strong">Who decides:</span> {g.who}</p>
+                  <p className="text-xs text-faint">Live: {g.live}</p>
+                  <Link href={g.link[0]} className="text-xs font-medium text-strong underline underline-offset-2">{g.link[1]} →</Link>
                 </div>
               </div>
             </Card>
@@ -94,11 +94,11 @@ async function Gates() {
         ))}
       </ol>
       <Card title="The one rule behind all seven">
-        <p className="text-sm text-zinc-800">
+        <p className="text-sm text-strong">
           The AI proposes. Fixed, written, tested rules decide. People sign. Anything the rules cannot verify is refused
           or held, never guessed.
         </p>
-        <p className="mt-2 text-xs text-zinc-500">
+        <p className="mt-2 text-xs text-faint">
           Honesty note: this demo uses fictional documents and people, and a real AI model hosted by Groq, so questions
           and the retrieved passages are sent to that external service. A production deployment would run the model inside
           the client&apos;s own environment.

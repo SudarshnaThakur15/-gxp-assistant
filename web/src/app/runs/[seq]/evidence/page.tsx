@@ -16,8 +16,8 @@ export default function EvidencePage(props: PageProps<"/runs/[seq]/evidence">) {
 
 function Section({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-2 break-inside-avoid border-t border-zinc-200 pt-4">
-      <h2 className="text-lg font-semibold text-zinc-900">{n}. {title}</h2>
+    <section className="flex flex-col gap-2 break-inside-avoid border-t border-line pt-4">
+      <h2 className="text-lg font-semibold text-strong">{n}. {title}</h2>
       {children}
     </section>
   );
@@ -26,8 +26,8 @@ function Section({ n, title, children }: { n: number; title: string; children: R
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="grid grid-cols-[10rem_1fr] gap-3 text-sm">
-      <dt className="text-zinc-500">{label}</dt>
-      <dd className="text-zinc-900">{children}</dd>
+      <dt className="text-faint">{label}</dt>
+      <dd className="text-strong">{children}</dd>
     </div>
   );
 }
@@ -48,18 +48,18 @@ async function Pack({ params }: { params: PageProps<"/runs/[seq]/evidence">["par
   const prompts = run.trace.filter((g) => g.prompt).map((g) => `${g.gate}: ${g.prompt?.version}`).join(" · ");
 
   return (
-    <article className="mx-auto flex w-full max-w-4xl flex-col gap-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm print:border-0 print:p-0 print:shadow-none">
+    <article className="mx-auto flex w-full max-w-4xl flex-col gap-5 rounded-card border border-line bg-white p-6 shadow-card print:border-0 print:p-0 print:shadow-none">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Inspection evidence pack</p>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Run #{run.seq}: {run.question}</h1>
+          <p className="text-xs font-semibold uppercase tracking-wider text-faint">Inspection evidence pack</p>
+          <h1 className="text-2xl font-bold tracking-tight text-strong">Run #{run.seq}: {run.question}</h1>
         </div>
         <div className="flex gap-2 print:hidden">
-          <Link href={`/runs/${run.seq}`} className="rounded-lg px-3 py-1.5 text-sm text-zinc-700 ring-1 ring-inset ring-zinc-300">← Back to run</Link>
+          <Link href={`/runs/${run.seq}`} className="rounded-lg px-3 py-1.5 text-sm text-body ring-1 ring-inset ring-line">← Back to run</Link>
           <PrintButton />
         </div>
       </div>
-      <div className="flex flex-col gap-1 text-xs text-zinc-600">
+      <div className="flex flex-col gap-1 text-xs text-muted">
         <p>Generated {formatTime(generatedAt)} for {me.name}, assembled from the live audit trail, not from a template.</p>
         <p>
           Audit chain at generation time:{" "}
@@ -89,14 +89,14 @@ async function Pack({ params }: { params: PageProps<"/runs/[seq]/evidence">["par
         </dl>
         {run.checks.length > 0 && (
           <table className="mt-2 w-full text-left text-xs">
-            <thead className="text-zinc-500"><tr><th className="py-1 pr-2">Check</th><th className="py-1 pr-2">Rule</th><th className="py-1 pr-2">Result</th><th className="py-1">Detail</th></tr></thead>
-            <tbody className="divide-y divide-zinc-100 align-top">
+            <thead className="text-faint"><tr><th className="py-1 pr-2">Check</th><th className="py-1 pr-2">Rule</th><th className="py-1 pr-2">Result</th><th className="py-1">Detail</th></tr></thead>
+            <tbody className="divide-y divide-line-soft align-top">
               {run.checks.map((c) => (
                 <tr key={c.id}>
                   <td className="py-1 pr-2"><Mono>{c.id}</Mono></td>
                   <td className="py-1 pr-2">{c.title} ({c.severity === "hard" ? "blocking" : "review"})</td>
                   <td className="py-1 pr-2">{c.status}</td>
-                  <td className="py-1 text-zinc-600">{c.detail ?? "shown to QA Managers only"}</td>
+                  <td className="py-1 text-muted">{c.detail ?? "shown to QA Managers only"}</td>
                 </tr>
               ))}
             </tbody>
@@ -109,22 +109,22 @@ async function Pack({ params }: { params: PageProps<"/runs/[seq]/evidence">["par
           <ol className="flex flex-col gap-2">
             {run.answer.citations.map((c) => (
               <li key={c.n} className="flex flex-col gap-1 text-sm">
-                <p>[{c.n}] <CitationChip c={c} />{c.page != null && <span className="text-xs text-zinc-500"> page {c.page}</span>}</p>
-                {c.quotes.map((q) => <blockquote key={q} className="border-l-4 border-zinc-300 bg-zinc-50 px-3 py-1.5 text-zinc-700">“{q}”</blockquote>)}
+                <p>[{c.n}] <CitationChip c={c} />{c.page != null && <span className="text-xs text-faint"> page {c.page}</span>}</p>
+                {c.quotes.map((q) => <blockquote key={q} className="border-l-4 border-line bg-page px-3 py-1.5 text-body">“{q}”</blockquote>)}
               </li>
             ))}
           </ol>
         ) : (
-          <p className="text-sm text-zinc-600">
+          <p className="text-sm text-muted">
             {run.outcome === "held" ? "Withheld until a QA Manager signs it." : "No document was quoted in a released answer."}
           </p>
         )}
         {run.answer && (
-          <div className="mt-2 rounded-lg bg-zinc-50 p-3 text-sm">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <div className="mt-2 rounded-lg bg-page p-3 text-sm">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">
               {run.answer.withheld ? "Withheld draft (QA Managers only)" : "Answer as released"}
             </p>
-            <p className="text-zinc-900">{run.answer.text}</p>
+            <p className="text-strong">{run.answer.text}</p>
           </div>
         )}
       </Section>
@@ -137,7 +137,7 @@ async function Pack({ params }: { params: PageProps<"/runs/[seq]/evidence">["par
             <Row label="Signed content">SHA-256 <Mono>{run.review.content_hash}</Mono></Row>
           </dl>
         ) : (
-          <p className="text-sm text-zinc-600">
+          <p className="text-sm text-muted">
             {run.outcome === "held" ? "Not yet signed: waiting for a QA Manager." : "No signature required: decided by the rules."}
           </p>
         )}
@@ -145,8 +145,8 @@ async function Pack({ params }: { params: PageProps<"/runs/[seq]/evidence">["par
 
       <Section n={5} title="Audit trail entries for this run">
         <table className="w-full text-left text-xs">
-          <thead className="text-zinc-500"><tr><th className="py-1 pr-2">#</th><th className="py-1 pr-2">Time (UTC)</th><th className="py-1 pr-2">Who</th><th className="py-1 pr-2">Event</th><th className="py-1">Hash</th></tr></thead>
-          <tbody className="divide-y divide-zinc-100 align-top">
+          <thead className="text-faint"><tr><th className="py-1 pr-2">#</th><th className="py-1 pr-2">Time (UTC)</th><th className="py-1 pr-2">Who</th><th className="py-1 pr-2">Event</th><th className="py-1">Hash</th></tr></thead>
+          <tbody className="divide-y divide-line-soft align-top">
             {run.history.map((h) => (
               <tr key={h.seq}>
                 <td className="py-1 pr-2"><Mono>{h.seq}</Mono></td>

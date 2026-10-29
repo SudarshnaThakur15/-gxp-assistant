@@ -48,14 +48,14 @@ async function Evaluation() {
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {tiles.map(([value, label]) => (
-          <div key={label} className={`rounded-2xl border bg-white p-4 shadow-sm ${
-            label.startsWith("unsafe") && Number(value) > 0 ? "border-rose-300" : "border-zinc-200"}`}>
-            <p className="text-2xl font-bold tracking-tight text-zinc-900">{value}</p>
-            <p className="text-xs text-zinc-500">{label}</p>
+          <div key={label} className={`rounded-card border bg-white p-4 shadow-card ${
+            label.startsWith("unsafe") && Number(value) > 0 ? "border-fail/40" : "border-line"}`}>
+            <p className="text-2xl font-bold tracking-tight text-strong">{value}</p>
+            <p className="text-xs text-faint">{label}</p>
           </div>
         ))}
       </div>
-      <p className="-mt-3 text-xs text-zinc-500">
+      <p className="-mt-3 text-xs text-faint">
         Run {formatTime(p.recorded_at)} · rules <Mono>{p.ruleset.version}</Mono> · AI <Mono>{p.model}</Mono>
         {p.runs > 1 && ` · ${p.runs} runs, answers that changed between runs: ${p.flaky.join(", ") || "none"}`}
       </p>
@@ -64,7 +64,7 @@ async function Evaluation() {
         <Card title="Expected outcome vs what the system did">
           <table className="w-full text-center text-sm">
             <thead>
-              <tr className="text-xs text-zinc-500">
+              <tr className="text-xs text-faint">
                 <th className="py-2 text-left font-medium">Expected ↓ · got →</th>
                 {ORDER.map((a) => <th key={a} className="py-2 font-medium">{D[a]}</th>)}
               </tr>
@@ -72,33 +72,33 @@ async function Evaluation() {
             <tbody>
               {ORDER.map((e, i) => (
                 <tr key={e}>
-                  <th className="py-2 text-left text-xs font-medium text-zinc-500">{D[e]}</th>
+                  <th className="py-2 text-left text-xs font-medium text-faint">{D[e]}</th>
                   {ORDER.map((a, j) => {
                     const n = p.matrix[e][a];
-                    const tone = i === j ? "bg-emerald-50 text-emerald-900" : j < i ? (n ? "bg-rose-100 text-rose-900" : "bg-rose-50/40 text-zinc-400") : (n ? "bg-amber-50 text-amber-900" : "text-zinc-400");
+                    const tone = i === j ? "bg-ok-bg text-ok-text" : j < i ? (n ? "bg-fail-bg text-fail-text" : "bg-fail-bg/40 text-faint") : (n ? "bg-wait-bg text-wait-text" : "text-faint");
                     return <td key={a} className={`rounded-lg py-2 font-semibold ${tone}`}>{n}</td>;
                   })}
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="mt-3 text-xs text-zinc-500">
+          <p className="mt-3 text-xs text-faint">
             Green: as expected. Amber, above the diagonal: stricter than needed (over-cautious: a person checks
             something that could have been released). Red, below the diagonal: less strict than expected, the error
             that matters. A released answer that should have been held or refused is an unsafe release.
           </p>
         </Card>
         <Card title="Every question">
-          <ul className="divide-y divide-zinc-100">
+          <ul className="divide-y divide-line-soft">
             {p.results.map((r) => (
               <li key={r.id} className="flex flex-col gap-0.5 py-2 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={r.pass ? "font-bold text-emerald-700" : "font-bold text-rose-700"}>{r.pass ? "✓" : "✕"}</span>
+                  <span className={r.pass ? "font-bold text-ok-text" : "font-bold text-fail-text"}>{r.pass ? "✓" : "✕"}</span>
                   <Mono className="font-semibold">{r.id}</Mono>
-                  <span className="text-xs text-zinc-500">{r.split}{r.contaminated && " · contaminated"}</span>
+                  <span className="text-xs text-faint">{r.split}{r.contaminated && " · contaminated"}</span>
                   <RunLink seq={r.audit_seq}>{r.question}</RunLink>
                 </div>
-                <p className="pl-6 text-xs text-zinc-600">
+                <p className="pl-6 text-xs text-muted">
                   Expected {D[r.expected]} · got {D[r.actual]}{r.failures.length > 0 && ` · ${r.failures.join("; ")}`}
                 </p>
               </li>

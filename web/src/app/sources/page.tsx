@@ -41,12 +41,12 @@ async function SourceCards() {
           const total = rows.reduce((n, d) => n + d.count, 0);
           return (
             <Card key={s.format} title={s.name}
-              aside={<span className="rounded-full bg-zinc-50 px-2 py-0.5 text-xs text-zinc-700 ring-1 ring-inset ring-zinc-200">File import · demo</span>}>
-              <p className="text-sm text-zinc-700">{s.what}</p>
-              <p className="mt-2 text-xs text-zinc-500"><Mono>{s.path}</Mono> · {s.format}</p>
-              <p className="mt-3 text-2xl font-bold text-zinc-900">{total}</p>
-              <p className="text-xs text-zinc-500">document version(s)</p>
-              <ul className="mt-2 text-xs text-zinc-600">
+              aside={<span className="rounded-full bg-page px-2 py-0.5 text-xs text-body ring-1 ring-inset ring-line">File import · demo</span>}>
+              <p className="text-sm text-body">{s.what}</p>
+              <p className="mt-2 text-xs text-faint"><Mono>{s.path}</Mono> · {s.format}</p>
+              <p className="mt-3 text-2xl font-bold text-strong">{total}</p>
+              <p className="text-xs text-faint">document version(s)</p>
+              <ul className="mt-2 text-xs text-muted">
                 {rows.map((d) => (
                   <li key={`${d.client}-${d.status}`}>
                     {d.count} {d.status}{d.client ? `, ${d.client} only` : d.tenant === "public" ? ", public" : ", shared"}
@@ -58,28 +58,28 @@ async function SourceCards() {
         })}
       </div>
       <Card title="Last import"
-        aside={<Link href="/documents" className="text-sm text-zinc-600 hover:underline">Document library →</Link>}>
+        aside={<Link href="/documents" className="text-sm text-muted hover:underline">Document library →</Link>}>
         {run ? (
           <div className="flex flex-col gap-2 text-sm">
-            <p className="text-zinc-700">
+            <p className="text-body">
               {formatTime(run.recorded_at)} · audit <Mono>#{run.audit_seq}</Mono> · {run.unchanged} unchanged ·{" "}
               {run.ingested.length} new · {run.metadata_updated.length} metadata updated · {run.withdrawn.length} withdrawn
             </p>
             {run.rejected.length > 0 && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <p className="text-sm font-medium text-amber-900">Rejected ({run.rejected.length}): not loaded until fixed</p>
-                <ul className="mt-1 text-xs text-amber-900">
+              <div className="rounded-xl border border-wait/40 bg-wait-bg p-3">
+                <p className="text-sm font-medium text-wait-text">Rejected ({run.rejected.length}): not loaded until fixed</p>
+                <ul className="mt-1 text-xs text-wait-text">
                   {run.rejected.map((r) => <li key={r.source}><Mono>{r.source}</Mono>: {r.problems.join(", ")}</li>)}
                 </ul>
               </div>
             )}
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-faint">
               Re-run with <Mono>uv run python -m app.ingest</Mono>. Unchanged files are skipped by fingerprint; a document
               removed from its source is withdrawn, never left searchable.
             </p>
           </div>
         ) : (
-          <p className="text-sm text-zinc-500">No import has been recorded yet.</p>
+          <p className="text-sm text-faint">No import has been recorded yet.</p>
         )}
       </Card>
     </>

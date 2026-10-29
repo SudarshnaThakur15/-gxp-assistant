@@ -41,12 +41,12 @@ export function RoiCalculator({ releasedShare, heldShare }: { releasedShare: num
       <div className="flex flex-col gap-3">
         {FIELDS.map((f) => (
           <label key={f.key} className="flex items-center justify-between gap-3 text-sm">
-            <span className="text-zinc-700">{f.label}</span>
+            <span className="text-body">{f.label}</span>
             <span className="flex items-center gap-1">
               <input type="number" min={0} max={f.max} value={v[f.key]}
                 onChange={(e) => setV({ ...v, [f.key]: Math.min(Math.max(Number(e.target.value) || 0, 0), f.max) })}
-                className="w-24 rounded-lg border border-zinc-300 px-2 py-1 text-right" />
-              <span className="w-6 text-xs text-zinc-500">{f.unit}</span>
+                className="w-24 rounded-lg border border-line px-2 py-1 text-right" />
+              <span className="w-6 text-xs text-faint">{f.unit}</span>
             </span>
           </label>
         ))}
@@ -59,17 +59,17 @@ export function RoiCalculator({ releasedShare, heldShare }: { releasedShare: num
             [(saved / HOURS_PER_FTE_MONTH).toFixed(1), "full-time people freed for other work"],
             [`€${Math.round(saved * v.hourlyCost).toLocaleString("en-GB")}`, "per month, at your hourly cost"],
           ].map(([value, label]) => (
-            <div key={label} className="rounded-xl bg-zinc-50 p-3">
-              <p className="text-xl font-bold text-zinc-900">{value}</p>
-              <p className="text-xs text-zinc-500">{label}</p>
+            <div key={label} className="rounded-xl bg-page p-3">
+              <p className="text-xl font-bold text-strong">{value}</p>
+              <p className="text-xs text-faint">{label}</p>
             </div>
           ))}
         </div>
-        <div className="flex flex-col gap-1.5 text-xs text-zinc-600">
-          <Bar label="Today" hours={before} max={before} tone="bg-zinc-400" />
-          <Bar label="With the assistant" hours={after} max={before} tone="bg-emerald-600" />
+        <div className="flex flex-col gap-1.5 text-xs text-muted">
+          <Bar label="Today" hours={before} max={before} tone="bg-line-strong" />
+          <Bar label="With the assistant" hours={after} max={before} tone="bg-ok" />
         </div>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-faint">
           {Math.round(v.questions * (held + manual)).toLocaleString("en-GB")} questions a month would still be read by a
           person before use (held) or handled by hand (refused or not found). A model, not a measurement: the shares
           come from this demo&apos;s runs; replace every number with the client&apos;s own.
@@ -83,7 +83,7 @@ function Bar({ label, hours, max, tone }: { label: string; hours: number; max: n
   return (
     <div>
       <p>{label}: {Math.round(hours).toLocaleString("en-GB")} h / month</p>
-      <div className="h-3 rounded-full bg-zinc-100">
+      <div className="h-3 rounded-full bg-sunken">
         <div className={`h-3 rounded-full ${tone}`} style={{ width: `${max ? Math.min((hours / max) * 100, 100) : 0}%` }} />
       </div>
     </div>

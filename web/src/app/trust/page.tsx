@@ -39,9 +39,9 @@ async function TrustContent() {
     <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {tiles.map(([value, label]) => (
-          <div key={label} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-            <p className="text-2xl font-bold tracking-tight text-zinc-900">{value}</p>
-            <p className="text-xs text-zinc-500">{label}</p>
+          <div key={label} className="rounded-card border border-line bg-white p-4 shadow-card">
+            <p className="text-2xl font-bold tracking-tight text-strong">{value}</p>
+            <p className="text-xs text-faint">{label}</p>
           </div>
         ))}
       </div>
@@ -50,53 +50,53 @@ async function TrustContent() {
         <Card title="Data boundary">
           <dl className="flex flex-col gap-3 text-sm">
             <div>
-              <dt className="font-medium text-zinc-900">AI model: <Mono>{b.ai_model}</Mono> on {b.ai_provider}</dt>
-              <dd className="text-zinc-600">{b.ai_note}</dd>
+              <dt className="font-medium text-strong">AI model: <Mono>{b.ai_model}</Mono> on {b.ai_provider}</dt>
+              <dd className="text-muted">{b.ai_note}</dd>
             </div>
             <div>
-              <dt className="font-medium text-zinc-900">Search model: <Mono>{b.embedding_model}</Mono></dt>
-              <dd className="text-zinc-600">{b.embedding_note}</dd>
+              <dt className="font-medium text-strong">Search model: <Mono>{b.embedding_model}</Mono></dt>
+              <dd className="text-muted">{b.embedding_note}</dd>
             </div>
             <div>
-              <dt className="font-medium text-zinc-900">Database: {b.database}</dt>
-              <dd className="text-zinc-600">Documents, permissions and the audit trail.</dd>
+              <dt className="font-medium text-strong">Database: {b.database}</dt>
+              <dd className="text-muted">Documents, permissions and the audit trail.</dd>
             </div>
             <div>
-              <dt className="font-medium text-zinc-900">Rule set: <Mono>{b.ruleset_version}</Mono></dt>
-              <dd className="text-zinc-600">Plain code with no AI inside, running in this system.</dd>
+              <dt className="font-medium text-strong">Rule set: <Mono>{b.ruleset_version}</Mono></dt>
+              <dd className="text-muted">Plain code with no AI inside, running in this system.</dd>
             </div>
           </dl>
-          <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="mt-4 rounded-xl bg-wait-bg px-3 py-2 text-xs text-wait-text">
             Honesty note: in this demo the AI model is hosted outside the system. A production deployment for a GMP
             client would run the model inside the client&apos;s own environment, so no document text leaves it.
           </p>
         </Card>
         <Card title="Audit trail integrity"
-          aside={<form action={refreshPage}><button className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white">Re-check everything</button></form>}>
-          <p className={`text-sm font-medium ${audit.ok ? "text-emerald-800" : "text-rose-800"}`}>
+          aside={<form action={refreshPage}><button className="rounded-lg bg-ink px-3 py-1.5 text-sm font-medium text-white">Re-check everything</button></form>}>
+          <p className={`text-sm font-medium ${audit.ok ? "text-ok-text" : "text-fail-text"}`}>
             {audit.ok ? `✓ Chain intact: ${audit.entries} entries verified just now` : "✕ Chain broken"}
           </p>
-          {audit.head_hash && <p className="mt-1 text-xs text-zinc-500">Latest hash <Mono>{audit.head_hash}</Mono></p>}
+          {audit.head_hash && <p className="mt-1 text-xs text-faint">Latest hash <Mono>{audit.head_hash}</Mono></p>}
           <div className="mt-3 flex flex-wrap gap-2 text-sm">
-            <Link href="/audit" className="rounded-lg px-3 py-1.5 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-50">Browse and re-verify</Link>
-            <a href="/audit/csv" className="rounded-lg px-3 py-1.5 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-50">Download the audit trail (CSV)</a>
+            <Link href="/audit" className="rounded-lg px-3 py-1.5 ring-1 ring-inset ring-line hover:bg-page">Browse and re-verify</Link>
+            <a href="/audit/csv" className="rounded-lg px-3 py-1.5 ring-1 ring-inset ring-line hover:bg-page">Download the audit trail (CSV)</a>
           </div>
         </Card>
       </div>
 
       <Card title="Safeguards, and how each is verified">
-        <ul className="divide-y divide-zinc-100">
+        <ul className="divide-y divide-line-soft">
           {safeguards.map((s) => (
             <li key={s.name} className="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:gap-4">
               <span className={`h-fit w-fit shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${
-                s.ok === true ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
-                  : s.ok === false ? "bg-rose-50 text-rose-800 ring-rose-200"
-                  : "bg-zinc-50 text-zinc-700 ring-zinc-200"}`}>
+                s.ok === true ? "bg-ok-bg text-ok-text ring-ok/30"
+                  : s.ok === false ? "bg-fail-bg text-fail-text ring-fail/30"
+                  : "bg-page text-body ring-line"}`}>
                 {s.ok === true ? "Checked live ✓" : s.ok === false ? "FAILED live check" : "Tested"}
               </span>
               <div>
-                <p className="font-medium text-zinc-900">{s.name}</p>
-                <p className="text-zinc-600">{s.how}</p>
+                <p className="font-medium text-strong">{s.name}</p>
+                <p className="text-muted">{s.how}</p>
               </div>
             </li>
           ))}
@@ -106,24 +106,24 @@ async function TrustContent() {
       <Card title="Recent AI calls">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-left text-sm">
-            <thead className="text-xs uppercase tracking-wide text-zinc-500">
+            <thead className="text-xs uppercase tracking-wide text-faint">
               <tr>
                 <th className="py-2 pr-3 font-medium">Run</th><th className="py-2 pr-3 font-medium">What the AI did</th>
                 <th className="py-2 pr-3 font-medium">What the rules did</th><th className="py-2 pr-3 font-medium">What a person did</th>
                 <th className="py-2 font-medium">Tokens</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 align-top">
+            <tbody className="divide-y divide-line-soft align-top">
               {recent_calls.map((r) => (
                 <tr key={r.seq}>
                   <td className="py-2 pr-3">
                     <RunLink seq={r.seq}>{r.question}</RunLink>
-                    <p className="text-xs text-zinc-500"><Mono>#{r.seq}</Mono> · {r.asked_by} · {formatTime(r.recorded_at)}</p>
+                    <p className="text-xs text-faint"><Mono>#{r.seq}</Mono> · {r.asked_by} · {formatTime(r.recorded_at)}</p>
                   </td>
-                  <td className="py-2 pr-3 text-xs text-zinc-700">{r.ai_did}{r.model && <p className="text-zinc-500"><Mono>{r.model}</Mono></p>}</td>
-                  <td className="py-2 pr-3 text-xs text-zinc-700">{r.rules_did}</td>
-                  <td className="py-2 pr-3 text-xs text-zinc-700">{r.person_did}</td>
-                  <td className="py-2 text-xs text-zinc-700">{r.tokens.toLocaleString("en-GB")}</td>
+                  <td className="py-2 pr-3 text-xs text-body">{r.ai_did}{r.model && <p className="text-faint"><Mono>{r.model}</Mono></p>}</td>
+                  <td className="py-2 pr-3 text-xs text-body">{r.rules_did}</td>
+                  <td className="py-2 pr-3 text-xs text-body">{r.person_did}</td>
+                  <td className="py-2 text-xs text-body">{r.tokens.toLocaleString("en-GB")}</td>
                 </tr>
               ))}
             </tbody>

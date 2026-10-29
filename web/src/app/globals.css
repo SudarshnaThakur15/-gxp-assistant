@@ -1,19 +1,80 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f4f4f5;
-  --foreground: #18181b;
+/* Design tokens: dark ink sidebar, slate page, one brand blue, status colours by meaning. */
+@theme inline {
+  --font-sans: var(--font-plex-sans), "Segoe UI", system-ui, sans-serif;
+  --font-display: var(--font-sora), "Segoe UI", system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), "SFMono-Regular", ui-monospace, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+@theme {
+  --color-ink: #0a0a0b;
+  --color-ink-2: #171718;
+  --color-ink-line: #ffffff24;
+  --color-page: #f4f5f6;
+  --color-sunken: #e7e8e9;
+  --color-line: #d2d4d6;
+  --color-line-soft: #e7e8e9;
+  --color-line-strong: #b4b7ba;
+  --color-strong: #0a0a0b;
+  --color-body: #2a2a2c;
+  --color-muted: #58585a;
+  --color-faint: #6c6f73;
+
+  --color-brand: #1c9dd6;
+  --color-brand-action: #1177a6;
+  --color-brand-text: #10658c;
+  --color-brand-deep: #0c4c69;
+  --color-brand-soft: #eaf6fc;
+  --color-brand-tint: #cceaf7;
+
+  --color-ok: #1e9e6a;
+  --color-ok-bg: #d6f1e4;
+  --color-ok-text: #0f5f40;
+  --color-wait: #b9861f;
+  --color-wait-bg: #f7ecd2;
+  --color-wait-text: #755410;
+  --color-fail: #d64545;
+  --color-fail-bg: #fadbdb;
+  --color-fail-text: #8a2020;
+
+  --animate-fade-in: fade-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-progress: progress 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+
+  --radius-card: 14px;
+  --shadow-card: 0 1px 3px #0a0a0b14, 0 1px 2px #0a0a0b0d;
+  --shadow-lift: 0 4px 12px #0a0a0b14, 0 2px 4px #0a0a0b0a;
+  --shadow-brand: 0 8px 24px #1c9dd647;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background: var(--color-page);
+  color: var(--color-body);
+  font-family: var(--font-sans);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  color: var(--color-strong);
+  letter-spacing: -0.02em;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
+::selection {
+  background: var(--color-brand-tint);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px #1c9dd666;
+  border-radius: 6px;
 }

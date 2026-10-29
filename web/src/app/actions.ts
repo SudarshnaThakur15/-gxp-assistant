@@ -2,17 +2,21 @@
 
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 import { getPersonas, postJson, type AskResult, type SignResult } from "@/lib/api";
 import { getCurrentPersona, PERSONA_COOKIE } from "@/lib/persona";
 
-export async function switchPersona(formData: FormData) {
-  const id = formData.get("persona");
-  const personas = await getPersonas();
-  if (typeof id !== "string" || !personas.some((p) => p.id === id)) {
+// Where each role starts: the QA Manager's work is the review inbox.
+const HOME = { qa_analyst: "/", qa_manager: "/reviews", auditor: "/" } as const;
+
+export async function switchPersona(id: string) {
+  const persona = (await getPersonas()).find((p) => p.id === id);
+  if (!persona) {
     throw new Error("Unknown persona");
   }
   (await cookies()).set(PERSONA_COOKIE, id, { httpOnly: true, sameSite: "lax", path: "/" });
+  redirect(HOME[persona.role]);
 }
 
 // Pages that verify the chain or run the lab do so on every render: refreshing re-runs them.
