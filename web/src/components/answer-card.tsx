@@ -195,6 +195,12 @@ function GateDetail({ gate: g }: { gate: Gate }) {
     case "Screen":
       return (
         <div className={small}>
+          {g.followup && (
+            <p>
+              Follow-up rewritten by the AI as “{g.followup}”. The rules screened it as typed, as rewritten and with what
+              the chat named earlier.
+            </p>
+          )}
           {g.rules && g.rules.length > 0 && <p>Rule fired: {g.rules.map((r) => `${r.rule} ${r.title}`).join("; ")}</p>}
           {g.ai_intent && <p>AI classified it as <Mono>{g.ai_intent}</Mono>{g.ai_reason && `: ${g.ai_reason}`}</p>}
         </div>

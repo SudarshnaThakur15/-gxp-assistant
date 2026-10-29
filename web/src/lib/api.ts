@@ -86,6 +86,8 @@ export type RunSummary = {
   recorded_at: string;
   question: string;
   test: boolean;
+  chat_id: string;
+  turn: number;
   requested_by: { id: string; name: string };
   outcome: Outcome;
   label: string;
@@ -113,6 +115,7 @@ export type Gate = {
   rules?: { rule: string; title: string }[];
   ai_intent?: string | null;
   ai_reason?: string | null;
+  followup?: string | null; // a follow-up, as the AI rewrote it into one self-contained question
   llm?: Llm | null;
   prompt?: { version: string; fingerprint: string } | null;
   passages?: { doc: string; version: string; section: string; score: number; injection_flagged: boolean }[];
@@ -150,6 +153,8 @@ export type RunDetail = {
   prev_hash: string;
   question: string;
   test: boolean;
+  chat: { id: string; turn: number };
+  standalone_question: string | null; // a follow-up, as it was actually searched and answered
   requested_by: { id: string; name: string };
   outcome: Outcome;
   label: string;
@@ -170,10 +175,20 @@ export type RunDetail = {
   history: HistoryEvent[];
 };
 
+// A conversation: each message is its own run, with its own checks, decision and record.
+export type Chat = {
+  id: string;
+  title: string;
+  requested_by: { id: string; name: string };
+  turns: RunDetail[];
+};
+
 export type QueueItem = {
   ask_seq: number;
   requested_by: string;
   question: string;
+  standalone_question: string | null;
+  chat_id: string;
   tier: string;
   reasons: string[];
   text: string;
@@ -196,6 +211,8 @@ export type AskResult = {
   decision: "released" | "held_for_review" | "refused";
   decision_label: string;
   answer_type: string;
+  chat: { id: string; turn: number };
+  standalone_question: string | null;
   tier: string;
   reasons: string[];
   message: string;
@@ -231,6 +248,7 @@ export const verifyAudit = () => getJson<AuditVerification>("/audit/verify");
 export const getRuns = (persona: string, filter?: string) =>
   getJson<RunList>(`/runs?persona=${q(persona)}${filter ? `&filter=${q(filter)}` : ""}`);
 export const getRun = (persona: string, seq: number) => getJson<RunDetail>(`/runs/${seq}?persona=${q(persona)}`);
+export const getChat = (persona: string, id: string) => getJson<Chat>(`/chats/${q(id)}?persona=${q(persona)}`);
 export const getReviewCount = (persona: string) => getJson<{ waiting: number }>(`/reviews/count?persona=${q(persona)}`);
 export const getQueue = (persona: string) => getJson<QueueItem[]>(`/reviews?persona=${q(persona)}`);
 export const getAudit = (persona: string, limit: number, before?: number) =>

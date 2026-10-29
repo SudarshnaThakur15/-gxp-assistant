@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 
-import { askQuestion, type AskState } from "@/app/actions";
+import { askQuestion } from "@/app/actions";
 import { Spinner, TopBar } from "@/components/pending";
 
 // Each suggestion shows a different path through the rules.
@@ -15,20 +15,34 @@ const SUGGESTIONS = [
   { text: "Summarise deviation DEV-2026-019.", note: "a record with planted AI instructions" },
 ];
 
-const INITIAL: AskState = { question: "", result: null, error: null };
-
-export function Composer({ showSuggestions }: { showSuggestions: boolean }) {
-  const [state, formAction, pending] = useActionState(askQuestion, INITIAL);
+// The question box. In a chat, what you type is a follow-up: it is read with the chat's earlier questions.
+export function Composer({ chatId, showSuggestions, onAsk }: {
+  chatId: string | null;
+  showSuggestions: boolean;
+  onAsk?: (question: string | null) => void; // the question being checked; null once it failed
+}) {
   const [text, setText] = useState("");
-  const [asked, setAsked] = useState("");
-  const [opening, startOpening] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, startTransition] = useTransition();
   const router = useRouter();
-  const seq = state.result?.receipt.audit_seq;
-  const busy = pending || opening;
 
-  useEffect(() => {
-    if (seq) startOpening(() => router.push(`/?run=${seq}`));
-  }, [seq, router]);
+  function send() {
+    const question = text.trim();
+    if (question.length < 3 || busy) return;
+    setText("");
+    setError(null);
+    onAsk?.(question);
+    startTransition(async () => {
+      const res = await askQuestion(question, chatId);
+      if (res.error !== undefined) {
+        setError(res.error);
+        setText(question);
+        onAsk?.(null);
+        return;
+      }
+      startTransition(() => router.push(`/c/${res.chatId}#run-${res.seq}`));
+    });
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -44,50 +58,42 @@ export function Composer({ showSuggestions }: { showSuggestions: boolean }) {
         </div>
       )}
       <form
-        action={(fd) => { setAsked(text.trim()); setText(""); formAction(fd); }}
+        onSubmit={(e) => { e.preventDefault(); send(); }}
         className="rounded-card border border-line bg-white p-2 shadow-lift"
       >
-        {busy && (
-          <div role="status" aria-live="polite" className="flex flex-col gap-1.5 border-b border-line-soft px-3 pb-3 pt-2 motion-safe:animate-fade-in">
-            <p className="text-sm text-strong"><span className="text-faint">You asked:</span> {asked}</p>
-            <p className="flex items-center gap-2 text-sm text-muted">
-              <Spinner className="h-3.5 w-3.5 text-brand" />
-              {pending
-                ? "Screening, searching approved documents, drafting, checking every claim, recording. Usually 5–20 seconds."
-                : "Checked and recorded. Opening your answer…"}
-            </p>
-          </div>
-        )}
-        {state.error && !busy && <p className="mx-2 mt-1 rounded-lg bg-fail-bg px-3 py-2 text-sm text-fail-text">{state.error}</p>}
+        {error && !busy && <p className="mx-2 mt-1 rounded-lg bg-fail-bg px-3 py-2 text-sm text-fail-text">{error}</p>}
         <div className="flex items-end gap-2">
-          <label htmlFor="question" className="sr-only">Your question</label>
+          <label htmlFor="question" className="sr-only">{chatId ? "Your follow-up" : "Your question"}</label>
           <textarea
             id="question"
             name="question"
             rows={1}
             maxLength={1000}
-            value={busy ? "" : text}
+            value={text}
             disabled={busy}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && text.trim().length >= 3) {
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                e.currentTarget.form?.requestSubmit();
+                send();
               }
             }}
-            placeholder="Ask about an SOP, a specification, a deviation or a regulation…"
+            placeholder={busy ? "Checking your question…" : chatId ? "Ask a follow-up…" : "Ask about an SOP, a specification, a deviation or a regulation…"}
             className="max-h-40 min-h-11 flex-1 resize-none bg-transparent px-3 py-2.5 text-[15px] text-strong placeholder:text-faint focus:outline-none"
           />
           <button
             type="submit"
             disabled={busy || text.trim().length < 3}
-            className="mb-0.5 rounded-lg bg-brand-action px-4 py-2.5 text-sm font-semibold text-white shadow-brand transition-[opacity,transform] active:scale-[0.97] disabled:opacity-40 disabled:shadow-none"
+            className="mb-0.5 flex items-center gap-2 rounded-lg bg-brand-action px-4 py-2.5 text-sm font-semibold text-white shadow-brand transition-[opacity,transform] active:scale-[0.97] disabled:opacity-40 disabled:shadow-none"
           >
-            {busy ? "Checking…" : "Ask"}
+            {busy && <Spinner className="h-3.5 w-3.5" />}
+            {busy ? "Checking" : "Ask"}
           </button>
         </div>
         <p className="px-3 pb-1 pt-1 text-[11px] text-faint">
-          Each question is answered on its own from approved documents. Enter to send, Shift+Enter for a new line.
+          {chatId
+            ? "Follow-ups are read with this chat's earlier questions. Start a new chat for a new topic."
+            : "Each chat keeps its own context. Enter to send, Shift+Enter for a new line."}
         </p>
       </form>
     </div>

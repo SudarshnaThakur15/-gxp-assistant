@@ -38,6 +38,12 @@ async function Run({ params }: { params: PageProps<"/runs/[seq]">["params"] }) {
   return (
     <>
       <PageHeader eyebrow={`Question #${run.seq} · asked by ${run.requested_by.name}${run.test ? " (test account)" : ""}`} title={run.question} />
+      <p className="-mt-2 text-sm text-muted">
+        {run.standalone_question && <>A follow-up, searched as: <span className="text-strong">{run.standalone_question}</span> · </>}
+        <Link href={`/c/${run.chat.id}#run-${run.seq}`} className="font-medium text-brand-text hover:underline">
+          {run.chat.turn > 1 ? "See the whole chat →" : "Open as a chat →"}
+        </Link>
+      </p>
       <div className={run.can_review ? "grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]" : ""}>
         <AnswerCard run={run} viewerId={me.id} />
         {run.can_review && (

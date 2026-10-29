@@ -24,21 +24,26 @@ export async function refreshPage() {
   refresh();
 }
 
-export type AskState ={ question: string; result: AskResult | null; error: string | null };
+export type AskOutcome = { chatId: string; seq: number; error?: undefined } | { error: string };
 
-export async function askQuestion(_prev: AskState, formData: FormData): Promise<AskState> {
-  const question = String(formData.get("question") ?? "").trim();
-  if (question.length < 3) {
-    return { question, result: null, error: "Type a question first." };
+// A new question, or a follow-up in a chat (the API checks the chat is this person's own).
+export async function askQuestion(question: string, chatId: string | null): Promise<AskOutcome> {
+  const text = question.trim();
+  if (text.length < 3) {
+    return { error: "Type a question first." };
   }
   const { current } = await getCurrentPersona();
-  const res = await postJson<AskResult>("/ask", { persona: current.id, question });
+  const res = await postJson<AskResult>("/ask", { persona: current.id, question: text, chat_id: chatId });
   if (!res.ok) {
-    // 503: the audit entry could not be written, so nothing was released.
-    return { question, result: null, error: `Nothing was released (${res.status}). Try again in a minute.` };
+    // 404: not a chat this person can continue. 503: the audit entry could not be written, so nothing was released.
+    return {
+      error: res.status === 404
+        ? "This chat can't be continued. Start a new chat."
+        : `Nothing was released (${res.status}). Try again in a minute.`,
+    };
   }
   refresh();
-  return { question, result: res.data, error: null };
+  return { chatId: res.data.chat.id, seq: res.data.receipt.audit_seq };
 }
 
 export type SignState = { result: SignResult | null; error: string | null };

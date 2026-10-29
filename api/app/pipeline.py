@@ -8,20 +8,26 @@
   6 RECORD    hash-chained audit entry, committed BEFORE anything is released (invariant 4)
   7 RELEASE   released by rules / held for review / refused (app.assurance)
 
+A follow-up in a chat is first rewritten into one self-contained question (app.followup);
+the rules screen it as typed, as rewritten and with what the chat named earlier, and every
+later gate works on the rewrite. Each message is its own run with its own record.
+
 Every path (answer, not found, refusal, error) ends in TIER → RECORD → RELEASE.
 ask() returns the internal outcome, including a withheld draft for reviewers and
 evaluation; public_view() is the only thing a requester may see.
 """
 
+import secrets
 import time
 from dataclasses import asdict
 
 import psycopg
 
-from app import answer, assurance, retrieval, screening
+from app import answer, assurance, followup, retrieval, screening
 from app.audit import append_event
 from app.corpus import DOC_REF
 from app.retrieval import source_id
+from app.runs import LEGACY_CHAT
 
 NOT_FOUND = "Not found in the approved documentation available to you."
 INJECTION_NOTICE = "A retrieved record contains text addressed to AI systems. It was treated as data and ignored."
@@ -44,6 +50,20 @@ SELECT d.code, d.version, d.title, c.section_path, c.page, c.text, d.fingerprint
    AND d.tenant_id IN (u.tenant_id, 'public') AND c.section_path LIKE %(section)s
  ORDER BY c.ordinal
 """
+# A chat's turns so far, with the QA decision on any that were held.
+CHAT_TURNS_SQL = """
+SELECT a.seq, a.payload, r.payload ->> 'outcome'
+  FROM audit_log a
+  LEFT JOIN audit_log r ON r.event_type = 'review' AND (r.payload ->> 'ask_seq')::bigint = a.seq
+ WHERE a.event_type = 'ask'
+   AND (a.payload -> 'chat' ->> 'id' = %(chat)s OR (a.seq = %(legacy)s AND a.payload -> 'chat' IS NULL))
+ ORDER BY a.seq
+"""
+
+
+class ChatNotFound(Exception):
+    """No such chat for this user: nothing is asked and nothing is recorded."""
+
 
 def _ms(start: float) -> int:
     return round((time.perf_counter() - start) * 1000)
@@ -88,38 +108,91 @@ def _rule_sources(conn: psycopg.Connection, persona: str, sources: list[dict]) -
     return list(cited.values())
 
 
-def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: float | None = None) -> dict:
+def _shown(p: dict, review_outcome: str | None) -> str:
+    """What the requester was shown for an earlier turn: never a withheld draft."""
+    if p["decision"] == "released":
+        return p.get("released_text") or NOT_FOUND
+    if p["decision"] == "held_for_review":
+        if review_outcome == "approved":
+            return p.get("withheld_draft") or ""
+        return "Rejected by QA, never released." if review_outcome == "rejected" else "Held for QA review, not shown yet."
+    if p["answer_type"] == "refusal":
+        rules = "; ".join(x["title"] for x in (p.get("screen") or {}).get("rules", [])) or "a decision reserved for people"
+        quotes = " ".join(f'{c["doc"]} §{c["section"]} says: "{q}".' for c in p.get("refusal_sources") or []
+                          for q in c["quotes"])
+        return (f"Refused ({rules}): this assistant may not make that decision; it belongs to the investigator, "
+                f"QA and the Qualified Person. {quotes}").strip()
+    return "Refused: it could not be completed or verified, so nothing was released."
+
+
+def _chat_turns(conn: psycopg.Connection, persona: str, chat_id: str) -> list[dict]:
+    """A chat's turns so far, oldest first. Only the person who started it may continue it."""
+    m = LEGACY_CHAT.match(chat_id)
+    rows = conn.execute(CHAT_TURNS_SQL, {"chat": chat_id, "legacy": int(m.group(1)) if m else -1}).fetchall()
+    if not rows or any(p["persona"] != persona for _, p, _ in rows):
+        raise ChatNotFound(chat_id)
+    return [{"seq": seq, "question": p["question"], "asked": p.get("standalone_question") or p["question"],
+             "shown": _shown(p, review)} for seq, p, review in rows]
+
+
+def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str | None = None,
+        max_wait_s: float | None = None) -> dict:
     started = time.perf_counter()
     ms: dict[str, int] = {}
-    answer_type = error = error_detail = draft = gen_meta = r = None
+    answer_type = error = error_detail = draft = gen_meta = r = standalone = followup_meta = None
     hits, checks, resolved, notices = [], [], [], []
 
-    # 1 SCREEN: rules first; the AI only if no rule refused (it can add a refusal, never remove one)
+    # 1 SCREEN, a follow-up first: the AI rewrites it into one self-contained question (it only restates)
+    earlier = _chat_turns(conn, persona, chat_id) if chat_id else []
+    chat = {"id": chat_id or secrets.token_hex(8), "turn": len(earlier) + 1,
+            "previous": earlier[-1]["seq"] if earlier else None}
+    carried = assurance.carried_targets(question, [x for e in earlier for x in (e["question"], e["asked"])])
+    if earlier:
+        t = time.perf_counter()
+        _end_read_transaction(conn)
+        try:
+            rewritten, followup_meta = followup.rewrite(
+                question, [{"question": e["asked"], "shown": e["shown"]} for e in earlier], max_wait_s)
+            conversation = " ".join([*(f"{e['question']} {e['asked']} {e['shown']}" for e in earlier), question])
+            if added := assurance.added_identifiers(rewritten, conversation):
+                answer_type, error = "error", "follow-up failed: AddedIdentifiers"
+                error_detail = f"the rewrite named {', '.join(added)}, which nobody wrote in the chat"
+            elif assurance.evidence_form(rewritten) != assurance.evidence_form(question):
+                standalone = rewritten
+        except Exception as e:  # invariant 5: no fallback model; a failed AI step is a refusal
+            answer_type, error, error_detail = "error", f"follow-up failed: {type(e).__name__}", str(e)[:400]
+        ms["followup"] = _ms(t)
+    asked = standalone or question  # what every later gate works on
+
+    # Rules first, on every reading of the request; the AI only if no rule refused (it can add a refusal,
+    # never remove one)
     t = time.perf_counter()
-    rows = conn.execute(PERSONA_SQL, {"persona": persona, "codes": DOC_REF.findall(question.upper())}).fetchall()
+    texts = list(dict.fromkeys(x for x in (question, standalone, carried and f"{question} {carried}") if x))
+    rows = conn.execute(PERSONA_SQL, {"persona": persona,
+                                      "codes": DOC_REF.findall(" ".join(texts).upper())}).fetchall()
     screen = {"refused": False, "decided_by": "rules", "rules": [], "ai_intent": None}
     if not rows:
         screen.update(refused=True, rules=[{"rule": "S0", "title": "Unknown user"}])
-    elif fired := assurance.screen_rules(question, [{"code": c, "doc_type": dt, "record_state": rs}
-                                                    for _, c, dt, rs in rows if c]):
+    elif fired := assurance.screen_texts(texts, [{"code": c, "doc_type": dt, "record_state": rs}
+                                                  for _, c, dt, rs in rows if c]):
         screen.update(refused=True, rules=fired)
-    else:
+    elif answer_type is None:
         _end_read_transaction(conn)
         try:
-            result, meta = screening.classify(question, max_wait_s)
+            result, meta = screening.classify(asked, max_wait_s)
             screen.update(decided_by="rules + AI", ai_intent=result["intent"], ai_reason=result["reason"],
                           refused=result["intent"] == "out_of_scope_decision", llm=meta)
         except Exception as e:  # invariant 5: no fallback model; a failed AI step is a refusal
             answer_type, error, error_detail = "error", f"screening failed: {type(e).__name__}", str(e)[:400]
     ms["screen"] = _ms(t)
-    if answer_type is None and screen["refused"]:
+    if screen["refused"]:  # a rule's refusal outranks a failed follow-up rewrite
         answer_type = "refusal"
     elif answer_type is None and screen["ai_intent"] == "off_topic":
         answer_type = "not_found"
 
     # 2 RETRIEVE
     if answer_type is None:
-        r = retrieval.retrieve(conn, persona, question)
+        r = retrieval.retrieve(conn, persona, asked)
         hits = r.hits
         ms["retrieve"] = sum(r.ms.values())
         if not r.found:
@@ -131,7 +204,7 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
         _end_read_transaction(conn)
         t = time.perf_counter()
         try:
-            draft, gen_meta = answer.generate(question, hits, max_wait_s)
+            draft, gen_meta = answer.generate(asked, hits, max_wait_s)
             answer_type = "answer" if draft["status"] == "answered" else "not_found"
         except Exception as e:
             answer_type, error, error_detail = "error", f"generation failed: {type(e).__name__}", str(e)[:400]
@@ -143,7 +216,7 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
         in_force = {}
         if draft["status"] == "answered":
             in_force = dict(conn.execute(IN_FORCE_SQL, (list({h.document_id for h in hits}),)).fetchall())
-        checks, resolved, notices = assurance.validate(question, draft, hits, in_force, injected)
+        checks, resolved, notices = assurance.validate(asked, draft, hits, in_force, injected)
         if injected:
             notices.append(INJECTION_NOTICE)
         ms["validate"] = _ms(t)
@@ -153,7 +226,7 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
     if answer_type == "error":
         tier, reasons = "n/a", [error]
     else:
-        tier, reasons = assurance.tier(question, screen, cited, checks)
+        tier, reasons = assurance.tier(asked, screen, cited, checks)
     decision = assurance.release(tier, answer_type, checks)
 
     text, citations = _render([c for c in resolved if c["hit"] is not None])
@@ -185,7 +258,8 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
     gates = [
         {"n": 1, "gate": "Screen", "by": screen["decided_by"],
          "result": "refused" if screen["refused"] else ("error" if error and "screening" in error else "passed"),
-         "detail": "; ".join(f"{x['rule']} {x['title']}" for x in screen["rules"]) or screen.get("ai_intent")},
+         "detail": "; ".join(f"{x['rule']} {x['title']}" for x in screen["rules"]) or screen.get("ai_intent"),
+         "followup": standalone},
         {"n": 2, "gate": "Retrieve", "by": "rules",
          "result": "skipped" if r is None else ("found" if r.found else "not found"),
          "detail": None if r is None else {"passages": [f"{h.code} v{h.version} §{h.section}" for h in hits],
@@ -206,8 +280,12 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
     # 6 RECORD: committed to the hash-chained audit trail BEFORE anything is released
     payload = {
         "question": question, "persona": persona, "decision": decision, "answer_type": answer_type,
+        "chat": chat, "standalone_question": standalone,
         "tier": tier, "reasons": reasons, "error": error, "error_detail": error_detail,
         "ruleset": {"version": assurance.RULESET_VERSION, "fingerprint": assurance.RULESET_FINGERPRINT},
+        "followup": None if not earlier else {
+            "prompt": {"version": followup.PROMPT_VERSION, "fingerprint": followup.PROMPT_FINGERPRINT},
+            "llm": followup_meta, "carried_targets": carried or None},
         "screen": {k: v for k, v in screen.items() if k != "llm"} | {
             "prompt": {"version": screening.PROMPT_VERSION, "fingerprint": screening.PROMPT_FINGERPRINT},
             "llm": screen.get("llm")},
@@ -238,6 +316,7 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
     # 7 RELEASE
     return {
         "decision": decision, "decision_label": assurance.DECISION_LABELS[decision], "answer_type": answer_type,
+        "chat": {"id": chat["id"], "turn": chat["turn"]}, "standalone_question": standalone,
         "tier": tier, "reasons": reasons, "message": message,
         "citations": [{k: v for k, v in c.items() if k != "document_fingerprint"} for c in citations]
                      if decision != "held_for_review" else [],

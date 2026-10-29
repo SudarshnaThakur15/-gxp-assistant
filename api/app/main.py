@@ -16,10 +16,10 @@ from app.config import settings
 from app.db import pool, read_pool
 from app.documents import get_document, list_documents
 from app.governance import proof, sources, trust
-from app.pipeline import ask, public_view
+from app.pipeline import ChatNotFound, ask, public_view
 from app.retrieval import retrieve
 from app.review import SignatureRefused, answer_status, decide, queue
-from app.runs import audit_entries, list_runs, run_detail
+from app.runs import audit_entries, chat_detail, list_runs, run_detail
 
 
 @asynccontextmanager
@@ -211,6 +211,19 @@ def run_endpoint(seq: int, persona: str) -> dict:
     return run
 
 
+CHAT_ID = r"^(?:[0-9a-f]{16}|r\d{1,12})$"
+
+
+@app.get("/chats/{chat_id}")
+def chat_endpoint(chat_id: str, persona: str) -> dict:
+    """A whole chat, oldest message first: each message is its own run, as this persona may see it."""
+    with read_pool.connection() as conn:
+        chat = chat_detail(conn, persona, chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="No chat with this id is visible to you.")
+    return chat
+
+
 class RetrieveRequest(BaseModel):
     persona: str
     question: str
@@ -226,6 +239,7 @@ class AskRequest(BaseModel):
     # Demo only: the persona comes from the request. Production must take the user from SSO.
     persona: str = Field(max_length=64)
     question: str = Field(min_length=3, max_length=1000)
+    chat_id: str | None = Field(default=None, pattern=CHAT_ID)  # a follow-up in this chat; none starts one
 
 
 @app.post("/ask")
@@ -236,9 +250,11 @@ def ask_endpoint(req: AskRequest) -> dict:
             row = conn.execute("SELECT role FROM users WHERE id = %s", (req.persona,)).fetchone()
             if row is not None and row[0] == "auditor":  # segregation of duties: auditors are read-only
                 raise HTTPException(status_code=403, detail="Auditors are read-only and cannot ask questions.")
-            return public_view(ask(conn, req.persona, req.question))
+            return public_view(ask(conn, req.persona, req.question, chat_id=req.chat_id))
     except HTTPException:
         raise
+    except ChatNotFound as e:  # only the person who started a chat may continue it
+        raise HTTPException(status_code=404, detail="No chat with this id that you can continue.") from e
     except Exception as e:  # e.g. the audit trail could not be written: release nothing
         raise HTTPException(status_code=503, detail=f"Not released: {type(e).__name__}") from e
 

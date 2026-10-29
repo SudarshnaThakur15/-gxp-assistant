@@ -47,6 +47,7 @@ const REASONS: [RegExp, string][] = [
   [/^V9\b/, "Draft guidance was cited without its “not yet in force” label."],
   [/^V10\b/, "The draft named a product form or code its source never mentions."],
   [/^V11\b/, "The documents don't mention exactly what you asked about."],
+  [/^follow-up failed: AddedIdentifiers/, "The follow-up couldn't be understood safely, so nothing was searched. Ask it as a complete question."],
   [/failed: /, "The AI service did not respond in time, so nothing was released. Please try again."],
 ];
 

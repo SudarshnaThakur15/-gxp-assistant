@@ -62,3 +62,12 @@ def test_signature_line_shows_name_title_meaning_and_time():
     assert line == ("Jordan Lee, QA Manager. Approved: reviewed against the cited sources and released for use. "
                     "Signed 28 Oct 2026 14:05 UTC.")
 
+
+
+def test_a_followup_signature_binds_the_question_that_was_answered():
+    p = {"question": "and before that?", "persona": "qa-analyst-a", "withheld_draft": "t", "claims": [],
+         "retrieval": {"passages": []}}
+    plain_question = signed_content(1, "h", p)
+    assert "answered_question" not in plain_question  # existing signatures stay valid
+    assert signed_content(1, "h", p | {"standalone_question": None}) == plain_question
+    assert signed_content(1, "h", p | {"standalone_question": "Q?"})["answered_question"] == "Q?"

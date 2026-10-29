@@ -59,7 +59,8 @@ SELECT a.seq, a.hash, NULL, NULL,
        jsonb_build_object('question', a.payload -> 'question', 'persona', a.payload -> 'persona',
                           'tier', a.payload -> 'tier', 'reasons', a.payload -> 'reasons',
                           'withheld_draft', a.payload -> 'withheld_draft', 'claims', a.payload -> 'claims',
-                          'retrieval', jsonb_build_object('passages', a.payload -> 'retrieval' -> 'passages')),
+                          'retrieval', jsonb_build_object('passages', a.payload -> 'retrieval' -> 'passages'),
+                          'standalone_question', a.payload -> 'standalone_question', 'chat', a.payload -> 'chat'),
        NULL::bigint, NULL, NULL
   FROM audit_log a
   JOIN users q ON q.id = a.payload ->> 'persona' AND NOT q.is_test  -- automated test runs are not real work
@@ -125,10 +126,14 @@ def recorded_citations(payload: dict) -> list[dict]:
 
 
 def signed_content(seq: int, hash_: str, payload: dict) -> dict:
-    """Exactly what a reviewer sees and signs: the held text and its citations, bound to the audit entry."""
-    return {"ask": {"seq": seq, "hash": hash_}, "question": payload["question"],
-            "requested_by": payload["persona"], "text": payload["withheld_draft"],
-            "citations": recorded_citations(payload)}
+    """Exactly what a reviewer sees and signs: the held text and its citations, bound to the audit entry.
+    A follow-up also binds the self-contained question that was actually answered."""
+    content = {"ask": {"seq": seq, "hash": hash_}, "question": payload["question"],
+               "requested_by": payload["persona"], "text": payload["withheld_draft"],
+               "citations": recorded_citations(payload)}
+    if payload.get("standalone_question"):
+        content["answered_question"] = payload["standalone_question"]
+    return content
 
 
 def content_hash(content: dict) -> str:
@@ -178,6 +183,8 @@ def queue(conn: psycopg.Connection, signer_id: str) -> list[dict]:
         if any(f"{c['doc']}@{c['version']}" not in visible for c in content["citations"]):
             continue
         items.append({"ask_seq": seq, "requested_by": payload["persona"], "question": payload["question"],
+                      "standalone_question": payload.get("standalone_question"),
+                      "chat_id": (payload.get("chat") or {}).get("id") or f"r{seq}",
                       "tier": payload["tier"], "reasons": payload["reasons"], "text": content["text"],
                       "citations": _public(content), "content_hash": content_hash(content)})
     return items

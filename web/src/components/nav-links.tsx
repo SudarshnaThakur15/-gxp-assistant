@@ -54,7 +54,7 @@ function groupsFor(role: Persona["role"], waiting: number): Group[] {
 
 export function NavLinks({ role, waiting = 0 }: { role: Persona["role"]; waiting?: number }) {
   const pathname = usePathname();
-  const active = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  const active = (href: string) => (href === "/" ? pathname === "/" || pathname.startsWith("/c/") : pathname.startsWith(href));
   return (
     <nav className="flex flex-col gap-6">
       {groupsFor(role, waiting).map((group) => (

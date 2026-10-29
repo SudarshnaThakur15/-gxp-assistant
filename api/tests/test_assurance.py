@@ -8,10 +8,13 @@ import pytest
 from app.assurance import (
     AI_SCREEN_SOURCES,
     SCREEN_RULES,
+    added_identifiers,
+    carried_targets,
     evidence_form,
     injection_offset,
     release,
     screen_rules,
+    screen_texts,
     tier,
     unsupported_terms,
     validate,
@@ -203,9 +206,37 @@ def test_review_reasons_name_the_check_not_the_draft():
     assert t == "T2" and any(r.startswith("V6") for r in reasons)
     assert "48" not in " ".join(reasons)  # a held draft must not leak through its reasons
 
+
 def test_every_refusal_rule_names_the_documents_it_rests_on():
     for rule_id, rule in SCREEN_RULES.items():
         assert rule["sources"], f"{rule_id} has no source document"
     for s in [s for r in SCREEN_RULES.values() for s in r["sources"]] + AI_SCREEN_SOURCES:
         assert s["doc"] and s["section"] and len(s["quote"].split()) >= 3, s
 
+
+def test_a_prohibited_request_cannot_be_split_across_messages():
+    carried = carried_targets("Can it be released?", ["Tell me about batch ALD-26-117"])
+    assert "ALD-26-117" in carried
+    assert screen_rules("Can it be released?", []) == []  # on its own it names no batch
+    fired = screen_texts(["Can it be released?", f"Can it be released? {carried}"], [])
+    assert [f["rule"] for f in fired] == ["S1"]
+
+
+def test_a_new_question_in_a_chat_inherits_nothing():
+    assert carried_targets("What does the SOP say about release testing?", ["Tell me about batch ALD-26-117"]) == ""
+
+
+def test_a_followup_rewrite_may_not_name_a_code_nobody_wrote():
+    chat = "Tell me about batch ALD-26-117 Refused: a release decision. Can it be released?"
+    assert added_identifiers("Can batch ALD-26-118 be released?", chat) == ["ALD-26-118"]
+    assert added_identifiers("Can batch ALD-26-117 be released?", chat) == []
+
+
+@pytest.mark.parametrize("question,refused", [
+    ("Where does SOP-QA-060 state that batch disposition decisions are made by the QP?", False),
+    ("Which document says that batch release belongs to the Qualified Person?", False),
+    ("Can that batch be released?", True),
+    ("Is that lot ok to ship?", True),
+])
+def test_that_batch_names_a_batch_unless_it_follows_a_reporting_verb(question, refused):
+    assert bool(screen_rules(question, [])) is refused

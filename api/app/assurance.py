@@ -52,8 +52,15 @@ def _policy(quote: str) -> dict:
     return {"doc": "POL-QA-001", "section": "4", "quote": quote}
 
 
-AI_SCREEN_SOURCES = [_policy("These decisions belong to the investigator, QA and the Qualified Person")]
+# "that batch" names a batch, except after a reporting verb, where "that" starts a clause:
+# "SOP-QA-060 states that batch disposition is a QP decision" asks what a document says.
+REPORTING_VERBS = ("say", "says", "said", "state", "states", "stated", "show", "shows", "mean", "means",
+                   "confirm", "confirms", "require", "requires", "specify", "specifies", "indicate", "indicates",
+                   "mention", "mentions", "explain", "explains", "ensure", "ensures", "note", "notes")
+THAT_BATCH = "".join(rf"(?<!\b{v} )" for v in REPORTING_VERBS) + r"\bthat\s+(?:batch|lot)\b"
 
+
+AI_SCREEN_SOURCES = [_policy("These decisions belong to the investigator, QA and the Qualified Person")]
 
 SCREEN_RULES = {
     "S1": {
@@ -62,8 +69,8 @@ SCREEN_RULES = {
         "decision": (r"\b(?:releas(?:e|ed|ing)|ship(?:ped|ping)?|certif(?:y|ied|ication)|dispos(?:e|ed|ition)"
                      r"|reject(?:ed|ion)?|good to go|ok(?:ay)? to (?:use|ship|release)"
                      r"|approv(?:e|ed|al) (?:it |this |the batch )?for (?:use|release|sale|shipment))\b"),
-        "target": (r"\b[A-Z]{2,4}-\d{2}-\d{3}\b|\b(?:this|that|our|my)\s+(?:batch|lot)\b"
-                   r"|\b(?:can|could|should|may|shall)\s+(?:we|i)\b"),
+        "target": (r"\b[A-Z]{2,4}-\d{2}-\d{3}\b|\b(?:this|our|my)\s+(?:batch|lot)\b|" + THAT_BATCH
+                   + r"|\b(?:can|could|should|may|shall)\s+(?:we|i)\b"),
     },
     "S2": {
         "title": "Classifying a deviation",
@@ -96,6 +103,9 @@ SCREEN_RULES = {
         "target": None,
     },
 }
+# A follow-up that points back ("can it be released?") is also screened with what the chat named earlier.
+BACK_REFERENCE = r"\b(?:it|its|this|that|these|those|they|them|same|above|previous|earlier)\b"
+CODE = r"\b[A-Z]{2,5}(?:-[A-Z0-9]+)+\b"  # whole codes: ALD-26-117, SOP-QA-060, DEV-2026-027, ALD-101
 
 # --- Gate 4: validation rules ------------------------------------------------
 QUOTE_MIN_WORDS, QUOTE_MIN_CHARS = 3, 12   # a quote must be long enough to be real evidence
@@ -163,6 +173,7 @@ TIERS = {"T1": "Knowledge answer: released by rules with citations",
 RULESET = {
     "version": RULESET_VERSION,
     "screen": SCREEN_RULES, "screen_ai_sources": AI_SCREEN_SOURCES, "unnamed_target": UNNAMED_TARGET,
+    "followup": {"back_reference": BACK_REFERENCE, "code": CODE},
     "validation": {"checks": CHECKS, "quote_min_words": QUOTE_MIN_WORDS, "quote_min_chars": QUOTE_MIN_CHARS,
                    "evidence_keep": EVIDENCE_KEEP, "prohibited_language": PROHIBITED_LANGUAGE,
                    "injection_patterns": INJECTION_PATTERNS, "scope_concepts": SCOPE_CONCEPTS,
@@ -242,6 +253,28 @@ def screen_rules(question: str, named_records: list[dict]) -> list[dict]:
             continue  # reporting what a closed, documented record already says
         fired.append({"rule": rule_id, "title": rule["title"]})
     return fired
+
+
+def screen_texts(texts: list[str], named_records: list[dict]) -> list[dict]:
+    """screen_rules over every reading of one request (as typed, as rewritten, with carried targets)."""
+    fired = {f["rule"]: f for t in texts for f in screen_rules(t, named_records)}
+    return [fired[r] for r in SCREEN_RULES if r in fired]
+
+
+def carried_targets(message: str, earlier: list[str]) -> str:
+    """What the chat's earlier questions named (a batch, a record, 'this batch') when the message points
+    back at it, so a prohibited request cannot be split across messages."""
+    if not earlier or not re.search(BACK_REFERENCE, message, re.I):
+        return ""
+    found = [m.group(0) for q in earlier for rule in SCREEN_RULES.values() if rule["target"]
+             for m in re.finditer(rule["target"], q, re.I)]
+    return " ".join(dict.fromkeys(found))
+
+
+def added_identifiers(rewrite: str, conversation: str) -> list[str]:
+    """Codes the AI's rewrite of a follow-up names that nobody wrote in the chat: it may only restate."""
+    seen = evidence_form(conversation)
+    return [x for x in dict.fromkeys(re.findall(CODE, plain(rewrite))) if evidence_form(x) not in seen]
 
 
 # --- Gate 4 ----------------------------------------------------------------------

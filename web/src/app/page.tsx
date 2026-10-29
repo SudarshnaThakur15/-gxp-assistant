@@ -1,13 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
-import { AnswerCard } from "@/components/answer-card";
-import { Composer } from "@/components/composer";
-import { Card, EmptyState, ErrorNote, Eyebrow, formatTime, Mono, OutcomePill, PageHeader, RunLink, Skeleton, Stat } from "@/components/ui";
-import { getRun, getRuns, settle, verifyAudit, type Persona, type RunSummary } from "@/lib/api";
+import { Chat } from "@/components/chat";
+import { Card, EmptyState, ErrorNote, formatTime, Mono, OutcomePill, PageHeader, RunLink, Skeleton, Stat } from "@/components/ui";
+import { getRun, getRuns, settle, verifyAudit, type Persona } from "@/lib/api";
 import { getCurrentPersona } from "@/lib/persona";
-import { plainReason, STATUS } from "@/lib/plain";
-import { LinkPending } from "@/components/pending";
+import { plainReason } from "@/lib/plain";
 
 export default function HomePage(props: PageProps<"/">) {
   return (
@@ -23,88 +22,11 @@ async function Home({ searchParams }: { searchParams: PageProps<"/">["searchPara
   const me = persona.data.current;
   if (me.role === "auditor") return <Overview me={me} />;
   const raw = (await searchParams).run;
-  const selected = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : null;
-  return <Chat me={me} selected={selected} />;
-}
-
-// --- Analysts and QA Managers: ask, like a chat ------------------------------------------
-
-const DOT: Record<string, string> = { ok: "bg-ok", wait: "bg-wait", fail: "bg-fail", info: "bg-brand" };
-
-async function Chat({ me, selected }: { me: Persona; selected: number | null }) {
-  const [runs, run] = await Promise.all([
-    settle(getRuns(me.id)),
-    selected ? settle(getRun(me.id, selected)) : Promise.resolve(null),
-  ]);
-  const mine = (runs.data?.runs ?? []).filter((r) => r.requested_by.id === me.id);
-  const today = new Date().toISOString().slice(0, 10);
-  const groups: [string, RunSummary[]][] = [
-    ["Today", mine.filter((r) => r.recorded_at.slice(0, 10) === today)],
-    ["Earlier", mine.filter((r) => r.recorded_at.slice(0, 10) !== today)],
-  ];
-
-  const list = (
-    <nav aria-label="Your questions" className="flex flex-col gap-4">
-      <Link href="/" className="rounded-lg bg-ink px-3 py-2 text-center text-sm font-semibold text-white hover:bg-ink-2">
-        <LinkPending />
-        + New question
-      </Link>
-      {mine.length === 0 && <p className="px-1 text-sm text-faint">Your questions will appear here.</p>}
-      {groups.filter(([, items]) => items.length).map(([label, items]) => (
-        <div key={label} className="flex flex-col gap-0.5">
-          <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-[0.14em] text-faint">{label}</p>
-          {items.slice(0, 40).map((r) => (
-            <Link key={r.seq} href={`/?run=${r.seq}`} aria-current={r.seq === selected ? "page" : undefined}
-              className={`flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors ${
-                r.seq === selected ? "bg-brand-soft text-strong" : "text-body hover:bg-sunken/60"}`}>
-              <LinkPending />
-              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${DOT[STATUS[r.outcome].tone]}`} aria-label={STATUS[r.outcome].title} />
-              <span className="line-clamp-2">{r.question}</span>
-            </Link>
-          ))}
-        </div>
-      ))}
-    </nav>
-  );
-
-  return (
-    <div className="grid gap-6 lg:grid-cols-[250px_minmax(0,1fr)]">
-      <aside className="hidden lg:block">
-        <div className="sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto pr-1">{list}</div>
-      </aside>
-      <details className="rounded-card border border-line bg-white p-3 lg:hidden">
-        <summary className="cursor-pointer text-sm font-semibold text-strong">Your questions ({mine.length})</summary>
-        <div className="mt-3">{list}</div>
-      </details>
-
-      <section className="flex min-h-[70vh] min-w-0 flex-col gap-5">
-        {selected && run?.data ? (
-          <>
-            <div className="flex justify-end">
-              <p className="max-w-[85%] rounded-card rounded-br-md bg-ink px-4 py-3 text-[15px] text-white">{run.data.question}</p>
-            </div>
-            <AnswerCard run={run.data} viewerId={me.id} />
-          </>
-        ) : selected ? (
-          <ErrorNote>That question is not visible to {me.name}.</ErrorNote>
-        ) : (
-          <div className="flex flex-1 flex-col justify-center gap-3 py-6">
-            <Eyebrow>Assistant</Eyebrow>
-            <h1 className="max-w-2xl text-3xl font-extrabold leading-[1.08] sm:text-4xl">
-              Ask the approved documents.<br />Rules decide what you see.
-            </h1>
-            <p className="max-w-xl text-[15px] leading-relaxed text-muted">
-              Every answer quotes the exact document section it comes from. Fixed rules check each claim first, and
-              anything that needs a person waits for a QA signature. Try one of these:
-            </p>
-          </div>
-        )}
-        <div className="sticky bottom-3 z-10 mt-auto">
-          <Composer showSuggestions={!selected} />
-        </div>
-      </section>
-    </div>
-  );
+  if (typeof raw === "string" && /^\d+$/.test(raw)) {  // links from before chats: open the question's chat
+    const run = await settle(getRun(me.id, Number(raw)));
+    if (run.data) redirect(`/c/${run.data.chat.id}#run-${raw}`);
+  }
+  return <Chat me={me} chatId={null} />;
 }
 
 // --- Auditors: read-only overview ---------------------------------------------------------

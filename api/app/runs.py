@@ -11,13 +11,15 @@ entry if a QA Manager decided it. What a viewer may see depends on who they are:
 """
 
 import re
+from collections import defaultdict
 
 import psycopg
 
 from app.review import manifestation, recorded_citations
 
 NOT_FOUND = "Not found in the approved documentation available to you."
-FAILURE = re.compile(r"((?:screening|generation) failed: \w+)")
+FAILURE = re.compile(r"((?:screening|generation|follow-up) failed: \w+)")
+LEGACY_CHAT = re.compile(r"^r(\d+)$")  # a question asked before chats existed is a chat of one, "r<seq>"
 
 
 def public_reason(text: str | None) -> str | None:
@@ -66,13 +68,19 @@ SELECT a.seq, a.recorded_at, q.id, q.name, q.is_test, r.payload ->> 'outcome',
            'reasons', jsonb_build_array(a.payload -> 'reasons' -> 0),
            'generation', jsonb_build_object('model', a.payload -> 'generation' -> 'model'),
            'screen', jsonb_build_object('llm', jsonb_build_object('model', a.payload -> 'screen' -> 'llm' -> 'model')),
-           'ruleset', a.payload -> 'ruleset')
+           'ruleset', a.payload -> 'ruleset', 'chat', a.payload -> 'chat')
 """ + VISIBLE_RUNS + " ORDER BY a.seq DESC"
 HISTORY_SQL = """
 SELECT seq, recorded_at, actor, event_type, payload, hash
   FROM audit_log
- WHERE seq = %(seq)s
-    OR (event_type IN ('review', 'signature_refused') AND (payload ->> 'ask_seq')::bigint = %(seq)s)
+ WHERE seq = ANY (%(seqs)s)
+    OR (event_type IN ('review', 'signature_refused') AND (payload ->> 'ask_seq')::bigint = ANY (%(seqs)s))
+ ORDER BY seq
+"""
+CHAT_SEQS_SQL = """
+SELECT seq FROM audit_log
+ WHERE event_type = 'ask'
+   AND (payload -> 'chat' ->> 'id' = %(chat)s OR (seq = %(legacy)s AND payload -> 'chat' IS NULL))
  ORDER BY seq
 """
 
@@ -85,6 +93,12 @@ def outcome(payload: dict, review: dict | None) -> str:
     if payload["decision"] == "refused":
         return "refused"
     return "not_found" if payload["answer_type"] == "not_found" else "released"
+
+
+def chat_of(payload: dict, seq: int) -> dict:
+    """The chat a run belongs to, and its place in it."""
+    chat = payload.get("chat") or {}
+    return {"id": chat.get("id") or f"r{seq}", "turn": chat.get("turn", 1)}
 
 
 def _model(payload: dict) -> str | None:
@@ -105,7 +119,9 @@ def list_runs(conn: psycopg.Connection, viewer: str, filter_: str | None = None)
     for seq, recorded_at, req_id, req_name, is_test, review_outcome, p in conn.execute(
             SUMMARY_SQL, {"viewer": viewer}).fetchall():
         o = outcome(p, review_outcome and {"outcome": review_outcome})
+        chat = chat_of(p, seq)
         runs.append({"seq": seq, "recorded_at": recorded_at, "question": p["question"], "test": is_test,
+                     "chat_id": chat["id"], "turn": chat["turn"],
                      "requested_by": {"id": req_id, "name": req_name}, "outcome": o, "label": LABELS[o],
                      "tier": p["tier"], "reason": (public_reasons(p) or [None])[0], "model": _model(p),
                      "ruleset_version": p["ruleset"]["version"]})
@@ -125,7 +141,8 @@ def _trace(seq: int, hash_: str, p: dict, label: str) -> list[dict]:
         {"n": 1, "gate": "Screen", "by": screen.get("decided_by", "rules"),
          "result": "refused" if screen.get("refused") else ("error" if error.startswith("screening") else "passed"),
          "rules": screen.get("rules", []), "ai_intent": screen.get("ai_intent"), "ai_reason": screen.get("ai_reason"),
-         "llm": screen.get("llm"), "prompt": screen.get("prompt")},
+         "llm": screen.get("llm"), "prompt": screen.get("prompt"),
+         "followup": p.get("standalone_question"), "followup_llm": (p.get("followup") or {}).get("llm")},
         {"n": 2, "gate": "Retrieve", "by": "rules",
          "result": "skipped" if retrieval is None else ("found" if retrieval["found"] else "not found"),
          "passages": [] if retrieval is None else [
@@ -157,24 +174,14 @@ def _event_text(event_type: str, payload: dict) -> str:
     return f"Signature attempt refused ({payload.get('code')}): {payload.get('detail')}"
 
 
-def _with_titles(conn: psycopg.Connection, citations: list[dict]) -> list[dict]:
+def _titled(citations: list[dict], titles: dict) -> list[dict]:
     """Citations as shown: the document's title beside its code, never the internal fingerprint."""
-    titles = {}
-    if codes := list({c["doc"] for c in citations}):
-        titles = {(code, v): t for code, v, t in conn.execute(TITLES_SQL, (codes,)).fetchall()}
     return [{k: v for k, v in c.items() if k != "document_fingerprint"}
             | {"title": c.get("title") or titles.get((c["doc"], c["version"]))} for c in citations]
 
 
-def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
-    """One run as this viewer may see it. None = not visible to them."""
-    rows = visible_rows(conn, viewer, seq)
-    if not rows:
-        return None
-    seq, recorded_at, hash_, prev_hash, p, req_id, req_name, review_seq, review_hash, review, is_test = rows[0]
-    v = conn.execute(VIEWER_SQL, (viewer,)).fetchone()
-    is_signer = bool(v and v[2])
-    sees_drafts = is_signer or bool(v and v[3] == "auditor")  # reviewers, and read-only auditors
+def _detail(row: tuple, viewer: str, is_signer: bool, sees_drafts: bool, history: list[dict]) -> dict:
+    seq, recorded_at, hash_, prev_hash, p, req_id, req_name, review_seq, review_hash, review, is_test = row
     o = outcome(p, review)
 
     answer = None
@@ -185,19 +192,17 @@ def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
     elif o == "not_found":
         answer = {"text": NOT_FOUND, "withheld": False}
     if answer and o != "not_found":
-        answer["citations"] = _with_titles(conn, recorded_citations(p))
+        answer["citations"] = recorded_citations(p)
         answer["notices"] = p.get("notices", []) if o == "released" else []
     show_details = answer is not None or sees_drafts  # check details quote the draft
     checks = [c if show_details else c | {"detail": None} for c in p.get("checks") or []]
-
-    history = [{"seq": s, "recorded_at": t, "actor": actor, "event_type": et, "hash": h, "text": _event_text(et, pl)}
-               for s, t, actor, et, pl, h in conn.execute(HISTORY_SQL, {"seq": seq}).fetchall()]
     return {
         "seq": seq, "recorded_at": recorded_at, "hash": hash_, "prev_hash": prev_hash,
         "question": p["question"], "requested_by": {"id": req_id, "name": req_name}, "test": is_test,
+        "chat": chat_of(p, seq), "standalone_question": p.get("standalone_question"),
         "outcome": o, "label": LABELS[o], "decision": p["decision"], "answer_type": p["answer_type"],
         "tier": p["tier"], "reasons": public_reasons(p), "error": public_reason(p.get("error")),
-        "answer": answer, "rule_sources": _with_titles(conn, p.get("refusal_sources") or []),
+        "answer": answer, "rule_sources": p.get("refusal_sources") or [],
         "checks": checks, "trace": _trace(seq, hash_, p, LABELS[o]),
         "model": _model(p), "ruleset": p["ruleset"], "ms": p.get("ms", {}),
         "review": None if review is None else {
@@ -207,6 +212,48 @@ def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
         "can_review": is_signer and o == "held" and viewer != req_id,
         "history": history,
     }
+
+
+def run_details(conn: psycopg.Connection, viewer: str, seqs: list[int]) -> list[dict]:
+    """Runs as this viewer may see them, oldest first; runs they may not see are left out.
+    A fixed number of queries however many runs: each round trip to the database costs time."""
+    rows = conn.execute(RUNS_SQL + " AND a.seq = ANY (%(seqs)s) ORDER BY a.seq",
+                        {"viewer": viewer, "seqs": seqs}).fetchall()
+    if not rows:
+        return []
+    v = conn.execute(VIEWER_SQL, (viewer,)).fetchone()
+    is_signer = bool(v and v[2])
+    sees_drafts = is_signer or bool(v and v[3] == "auditor")  # reviewers, and read-only auditors
+    history = defaultdict(list)
+    for s, t, actor, et, pl, h in conn.execute(HISTORY_SQL, {"seqs": [r[0] for r in rows]}).fetchall():
+        history[s if et == "ask" else int(pl["ask_seq"])].append(
+            {"seq": s, "recorded_at": t, "actor": actor, "event_type": et, "hash": h, "text": _event_text(et, pl)})
+    details = [_detail(row, viewer, is_signer, sees_drafts, history[row[0]]) for row in rows]
+
+    cited = [c for d in details for c in d["rule_sources"] + ((d["answer"] or {}).get("citations") or [])]
+    titles = {}
+    if codes := list({c["doc"] for c in cited}):
+        titles = {(code, ver): title for code, ver, title in conn.execute(TITLES_SQL, (codes,)).fetchall()}
+    for d in details:
+        d["rule_sources"] = _titled(d["rule_sources"], titles)
+        if d["answer"] and "citations" in d["answer"]:
+            d["answer"]["citations"] = _titled(d["answer"]["citations"], titles)
+    return details
+
+
+def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
+    """One run as this viewer may see it. None = not visible to them."""
+    return next(iter(run_details(conn, viewer, [seq])), None)
+
+
+def chat_detail(conn: psycopg.Connection, viewer: str, chat_id: str) -> dict | None:
+    """A whole chat as this viewer may see it, oldest turn first. None = nothing in it is visible to them."""
+    m = LEGACY_CHAT.match(chat_id)
+    seqs = [s for (s,) in conn.execute(CHAT_SEQS_SQL, {"chat": chat_id, "legacy": int(m.group(1)) if m else -1})]
+    turns = run_details(conn, viewer, seqs) if seqs else []
+    if not turns:
+        return None
+    return {"id": chat_id, "title": turns[0]["question"], "requested_by": turns[0]["requested_by"], "turns": turns}
 
 
 def audit_entries(conn: psycopg.Connection, viewer: str, limit: int = 50, before: int | None = None) -> list[dict]:

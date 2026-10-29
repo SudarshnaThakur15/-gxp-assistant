@@ -58,6 +58,12 @@ async function Inbox({ searchParams }: { searchParams: PageProps<"/reviews">["se
         <Card>
           <p className="text-xs text-faint"><Mono>#{item.ask_seq}</Mono> · asked by {nameOf(item.requested_by)}</p>
           <h2 className="mt-1 text-xl font-semibold">{item.question}</h2>
+          {item.standalone_question && (
+            <p className="mt-1 text-sm text-muted">
+              A follow-up in a chat, searched and answered as: <span className="text-strong">{item.standalone_question}</span>{" "}
+              <Link href={`/c/${item.chat_id}#run-${item.ask_seq}`} className="font-medium text-brand-text hover:underline">See the whole chat →</Link>
+            </p>
+          )}
           <div className="mt-4 rounded-xl bg-page p-4">
             <p className="text-sm font-semibold text-strong">Why the rules held it</p>
             <ul className="mt-1.5 list-disc pl-5 text-sm text-body">
