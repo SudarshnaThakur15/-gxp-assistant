@@ -38,16 +38,31 @@ export default function RunsPage(props: PageProps<"/runs">) {
   );
 }
 
+const PAGE_SIZE = 20;
+
+function pageHref(filter: Filter | null, page: number) {
+  const q = new URLSearchParams();
+  if (filter) q.set("filter", filter);
+  if (page > 1) q.set("page", String(page));
+  const s = q.toString();
+  return s ? `/runs?${s}` : "/runs";
+}
+
 async function RunsTable({ searchParams }: { searchParams: PageProps<"/runs">["searchParams"] }) {
-  const raw = (await searchParams).filter;
+  const params = await searchParams;
+  const raw = params.filter;
+  const rawPage = typeof params.page === "string" ? Number(params.page) : 1;
   const filter = typeof raw === "string" && PILLS.some((p) => p.filter === raw) ? (raw as Filter) : null;
   const persona = await settle(getCurrentPersona());
   if (!persona.data) return <ErrorNote>API unreachable: {persona.error}</ErrorNote>;
   const me = persona.data.current;
   const res = await settle(getRuns(me.id, filter ?? undefined));
   if (!res.data) return <ErrorNote>API unreachable: {res.error}</ErrorNote>;
-  const { counts, runs } = res.data;
+  const { counts, runs: all } = res.data;
   const [title, sub] = TITLE[me.role];
+  const pages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  const page = Number.isInteger(rawPage) ? Math.min(Math.max(rawPage, 1), pages) : 1;
+  const runs = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
@@ -90,6 +105,32 @@ async function RunsTable({ searchParams }: { searchParams: PageProps<"/runs">["s
             </li>
           ))}
         </ul>
+      )}
+      {all.length > PAGE_SIZE && (
+        <nav aria-label="Pages" className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <p className="text-muted">
+            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, all.length)} of {all.length}
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {page > 1 && (
+              <Link href={pageHref(filter, page - 1)} className="rounded-lg border border-line bg-white px-3 py-1.5 font-medium text-body hover:border-line-strong">
+                <LinkPending />← Previous
+              </Link>
+            )}
+            {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
+              <Link key={n} href={pageHref(filter, n)} aria-current={n === page ? "page" : undefined}
+                className={`min-w-9 rounded-lg px-2.5 py-1.5 text-center font-medium ${
+                  n === page ? "bg-ink text-white" : "border border-line bg-white text-body hover:border-line-strong"}`}>
+                <LinkPending />{n}
+              </Link>
+            ))}
+            {page < pages && (
+              <Link href={pageHref(filter, page + 1)} className="rounded-lg border border-line bg-white px-3 py-1.5 font-medium text-body hover:border-line-strong">
+                <LinkPending />Next →
+              </Link>
+            )}
+          </div>
+        </nav>
       )}
     </>
   );

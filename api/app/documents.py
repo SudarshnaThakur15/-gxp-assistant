@@ -16,6 +16,7 @@ VISIBLE = """
 LIST_SQL = """
 SELECT d.code, d.title, d.version, d.status, d.doc_type, d.effective_date, d.owner, d.client_id,
        d.regulatory_status, d.record_state, d.source_format,
+       d.tenant_id = 'public' AS public, (SELECT name FROM clients WHERE id = d.client_id) AS client_name,
        (SELECT count(DISTINCT c.section_path) FROM chunks c WHERE c.document_id = d.id) AS sections
 """ + VISIBLE + " ORDER BY d.code, d.effective_date DESC NULLS LAST, d.version DESC"
 VERSION_SQL = """

@@ -351,6 +351,8 @@ export type DocumentSummary = {
   effective_date: string | null;
   owner: string | null;
   client_id: string | null;
+  client_name: string | null; // whose document it is; none = NorthBridge's own, or public
+  public: boolean; // a published regulation or guideline
   regulatory_status: string | null;
   record_state: string | null;
   source_format: string;
