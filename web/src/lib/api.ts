@@ -2,9 +2,11 @@ import "server-only";
 
 // The Python API owns all data access; the web app only calls it server-side.
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
+// Hosted demo: the API answers only callers holding this key.
+const KEY: Record<string, string> = process.env.API_SHARED_KEY ? { "x-demo-key": process.env.API_SHARED_KEY } : {};
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`);
+  const res = await fetch(`${API_URL}${path}`, { headers: KEY });
   if (!res.ok) {
     throw new Error(`API ${path} returned ${res.status}`);
   }
@@ -18,7 +20,7 @@ export async function postJson<T>(
 ): Promise<{ ok: true; data: T } | { ok: false; status: number; detail: unknown }> {
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...KEY },
     body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => null);
@@ -26,7 +28,7 @@ export async function postJson<T>(
 }
 
 export function getRaw(path: string): Promise<Response> {
-  return fetch(`${API_URL}${path}`);
+  return fetch(`${API_URL}${path}`, { headers: KEY });
 }
 
 const q = encodeURIComponent;

@@ -1,12 +1,15 @@
 import csv
 import io
 import json
+import hmac
 import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -40,6 +43,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def require_shared_key(request: Request, call_next):
+    """Hosted demo: only the web app (which holds the key) may call the API."""
+    key = settings.api_shared_key
+    if key and request.url.path != "/health" and not hmac.compare_digest(request.headers.get("x-demo-key", ""), key):
+        return JSONResponse({"detail": "Not allowed."}, status_code=401)
+    return await call_next(request)
+
+
+_asked: dict[str, deque] = defaultdict(deque)
+
+
+def _within_limit(persona: str) -> bool:
+    """Hourly limits on questions, overall and per person (in memory: one API instance)."""
+    now = time.monotonic()
+    for key in ("*", persona):
+        while _asked[key] and now - _asked[key][0] > 3600:
+            _asked[key].popleft()
+    if (len(_asked["*"]) >= settings.ask_limit_per_hour
+            or len(_asked[persona]) >= settings.ask_limit_per_persona_per_hour):
+        return False
+    _asked["*"].append(now)
+    _asked[persona].append(now)
+    return True
 
 
 @app.get("/health")
@@ -247,6 +276,8 @@ class AskRequest(BaseModel):
 @app.post("/ask")
 def ask_endpoint(req: AskRequest) -> dict:
     """All 7 gates; the audit record is committed before this returns anything."""
+    if not _within_limit(req.persona):
+        raise HTTPException(status_code=429, detail="The demo's hourly question limit has been reached.")
     try:
         with pool.connection() as conn:
             row = conn.execute("SELECT role FROM users WHERE id = %s", (req.persona,)).fetchone()

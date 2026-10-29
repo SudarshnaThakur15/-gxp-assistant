@@ -14,6 +14,12 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Hosted demo: the web app sends this key; without it the API answers nothing but /health.
+    api_shared_key: str | None = None
+    # Questions that may reach the AI, per hour: protects the provider's free-tier quota.
+    ask_limit_per_hour: int = 60
+    ask_limit_per_persona_per_hour: int = 20
+
     model_config = SettingsConfigDict(
         env_file=(REPO_ROOT / ".env", REPO_ROOT / ".env.local"),
         extra="ignore",

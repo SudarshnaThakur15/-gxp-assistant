@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { getPersonas, postJson, type AskResult, type SignResult } from "@/lib/api";
+import { ACCESS_COOKIE, accessToken } from "@/lib/access";
 import { getCurrentPersona, PERSONA_COOKIE } from "@/lib/persona";
 
 // Where each role starts: the QA Manager's work is the review inbox.
@@ -39,6 +40,8 @@ export async function askQuestion(question: string, chatId: string | null): Prom
     return {
       error: res.status === 404
         ? "This chat can't be continued. Start a new chat."
+        : res.status === 429
+        ? "The demo's question limit for this hour has been reached. Please try again later."
         : `Something went wrong, so nothing was shown (${res.status}). Please try again in a minute.`,
     };
   }
@@ -98,4 +101,22 @@ export async function answerTeam(requestSeq: number, _prev: TeamState, formData:
   if (!res.ok) return { error: typeof res.detail === "string" ? res.detail : `Not sent (${res.status}).`, done: false };
   refresh();
   return { error: null, done: true };
+}
+
+export type AccessState = { error: string | null };
+
+// Hosted demo: the shared access code unlocks the site for 30 days on this browser.
+export async function enterAccessCode(_prev: AccessState, formData: FormData): Promise<AccessState> {
+  const code = process.env.DEMO_ACCESS_CODE;
+  const next = String(formData.get("next") ?? "/");
+  const target = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  if (!code) redirect(target);
+  if (String(formData.get("code") ?? "").trim() !== code) {
+    await new Promise((r) => setTimeout(r, 800)); // slows down guessing
+    return { error: "That code isn't right. Ask the person who shared the link." };
+  }
+  (await cookies()).set(ACCESS_COOKIE, await accessToken(code), {
+    httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30,
+  });
+  redirect(target);
 }
