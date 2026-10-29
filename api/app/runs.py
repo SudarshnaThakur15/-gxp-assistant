@@ -4,9 +4,10 @@ A "run" is one question through the 7 gates: an `ask` audit entry, plus a `revie
 entry if a QA Manager decided it. What a viewer may see depends on who they are:
   - requesters see their own runs; a signer sees the runs of requesters whose clients
     they cover (a CDMO analyst never sees another client's questions)
-  - a withheld draft, and check details that quote it, are shown only to signers
-  - the raw audit payload (questions, drafts) is shown only to signers; everyone can
+  - a withheld draft, and check details that quote it, are shown only to signers and auditors
+  - the raw audit payload (questions, drafts) is shown only to auditors; everyone can
     see the chain itself (sequence, actor, event, hashes) and verify it
+  - runs by automated test accounts are shown to auditors only, labelled as tests
 """
 
 import re
@@ -28,6 +29,8 @@ def public_reason(text: str | None) -> str | None:
 
 def public_reasons(payload: dict) -> list[str]:
     return [public_reason(r) for r in payload.get("reasons") or []]
+
+
 LABELS = {
     "released": "Released by rules", "not_found": "Released by rules: not found",
     "held": "Held for review", "approved": "Released after QA review",
@@ -38,17 +41,32 @@ FILTERS = {  # list filter → outcomes it includes
     "decided": ("approved", "rejected"), "refused": ("refused",),
 }
 
-VIEWER_SQL = "SELECT id, name, can_sign FROM users WHERE id = %s"
-RUNS_SQL = """
-WITH viewer AS (SELECT id, tenant_id, client_ids, can_sign FROM users WHERE id = %(viewer)s)
-SELECT a.seq, a.recorded_at, a.hash, a.prev_hash, a.payload, q.id, q.name, r.seq, r.hash, r.payload
+VIEWER_SQL = "SELECT id, name, can_sign, role FROM users WHERE id = %s"
+VISIBLE_RUNS = """
   FROM audit_log a
   JOIN users q ON q.id = a.payload ->> 'persona'
   JOIN viewer v ON v.id = q.id
-              OR (v.can_sign AND v.tenant_id = q.tenant_id AND q.client_ids <@ v.client_ids)
+              OR ((v.can_sign OR v.role = 'auditor')            -- reviewers and auditors: their clients' runs
+                  AND v.tenant_id = q.tenant_id AND q.client_ids <@ v.client_ids
+                  AND (NOT q.is_test OR v.role = 'auditor'))  -- test runs: auditors only, labelled
   LEFT JOIN audit_log r ON r.event_type = 'review' AND (r.payload ->> 'ask_seq')::bigint = a.seq
  WHERE a.event_type = 'ask'
 """
+VIEWER_CTE = "WITH viewer AS (SELECT id, tenant_id, client_ids, can_sign, role FROM users WHERE id = %(viewer)s)\n"
+RUNS_SQL = VIEWER_CTE + """
+SELECT a.seq, a.recorded_at, a.hash, a.prev_hash, a.payload, q.id, q.name, r.seq, r.hash, r.payload, q.is_test
+""" + VISIBLE_RUNS
+# Lists show a title and a status: fetch only those fields, not every full audit record.
+SUMMARY_SQL = VIEWER_CTE + """
+SELECT a.seq, a.recorded_at, q.id, q.name, q.is_test, r.payload ->> 'outcome',
+       jsonb_build_object(
+           'question', a.payload -> 'question', 'decision', a.payload -> 'decision',
+           'answer_type', a.payload -> 'answer_type', 'tier', a.payload -> 'tier',
+           'reasons', jsonb_build_array(a.payload -> 'reasons' -> 0),
+           'generation', jsonb_build_object('model', a.payload -> 'generation' -> 'model'),
+           'screen', jsonb_build_object('llm', jsonb_build_object('model', a.payload -> 'screen' -> 'llm' -> 'model')),
+           'ruleset', a.payload -> 'ruleset')
+""" + VISIBLE_RUNS + " ORDER BY a.seq DESC"
 HISTORY_SQL = """
 SELECT seq, recorded_at, actor, event_type, payload, hash
   FROM audit_log
@@ -81,11 +99,12 @@ def visible_rows(conn: psycopg.Connection, viewer: str, seq: int | None = None) 
 
 
 def list_runs(conn: psycopg.Connection, viewer: str, filter_: str | None = None) -> dict:
-    """Runs visible to the viewer, newest first, with counts per filter."""
+    """Runs visible to the viewer, newest first, with counts per filter (summary fields only)."""
     runs = []
-    for seq, recorded_at, _, _, p, req_id, req_name, _, _, review in visible_rows(conn, viewer):
-        o = outcome(p, review)
-        runs.append({"seq": seq, "recorded_at": recorded_at, "question": p["question"],
+    for seq, recorded_at, req_id, req_name, is_test, review_outcome, p in conn.execute(
+            SUMMARY_SQL, {"viewer": viewer}).fetchall():
+        o = outcome(p, review_outcome and {"outcome": review_outcome})
+        runs.append({"seq": seq, "recorded_at": recorded_at, "question": p["question"], "test": is_test,
                      "requested_by": {"id": req_id, "name": req_name}, "outcome": o, "label": LABELS[o],
                      "tier": p["tier"], "reason": (public_reasons(p) or [None])[0], "model": _model(p),
                      "ruleset_version": p["ruleset"]["version"]})
@@ -142,15 +161,16 @@ def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
     rows = visible_rows(conn, viewer, seq)
     if not rows:
         return None
-    seq, recorded_at, hash_, prev_hash, p, req_id, req_name, review_seq, review_hash, review = rows[0]
+    seq, recorded_at, hash_, prev_hash, p, req_id, req_name, review_seq, review_hash, review, is_test = rows[0]
     v = conn.execute(VIEWER_SQL, (viewer,)).fetchone()
     is_signer = bool(v and v[2])
+    sees_drafts = is_signer or bool(v and v[3] == "auditor")  # reviewers, and read-only auditors
     o = outcome(p, review)
 
     answer = None
     if o == "released":
         answer = {"text": p.get("released_text"), "withheld": False}
-    elif o == "approved" or (o in ("held", "rejected") and is_signer):
+    elif o == "approved" or (o in ("held", "rejected") and sees_drafts):
         answer = {"text": p.get("withheld_draft"), "withheld": o != "approved"}
     elif o == "not_found":
         answer = {"text": NOT_FOUND, "withheld": False}
@@ -158,14 +178,14 @@ def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
         answer["citations"] = [{k: val for k, val in c.items() if k != "document_fingerprint"}
                                for c in recorded_citations(p)]
         answer["notices"] = p.get("notices", []) if o == "released" else []
-    show_details = answer is not None or is_signer  # check details quote the draft
+    show_details = answer is not None or sees_drafts  # check details quote the draft
     checks = [c if show_details else c | {"detail": None} for c in p.get("checks") or []]
 
     history = [{"seq": s, "recorded_at": t, "actor": actor, "event_type": et, "hash": h, "text": _event_text(et, pl)}
                for s, t, actor, et, pl, h in conn.execute(HISTORY_SQL, {"seq": seq}).fetchall()]
     return {
         "seq": seq, "recorded_at": recorded_at, "hash": hash_, "prev_hash": prev_hash,
-        "question": p["question"], "requested_by": {"id": req_id, "name": req_name},
+        "question": p["question"], "requested_by": {"id": req_id, "name": req_name}, "test": is_test,
         "outcome": o, "label": LABELS[o], "decision": p["decision"], "answer_type": p["answer_type"],
         "tier": p["tier"], "reasons": public_reasons(p), "error": public_reason(p.get("error")),
         "answer": answer, "checks": checks, "trace": _trace(seq, hash_, p, LABELS[o]),
@@ -180,9 +200,9 @@ def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
 
 
 def audit_entries(conn: psycopg.Connection, viewer: str, limit: int = 50, before: int | None = None) -> list[dict]:
-    """Audit entries, newest first. Payloads (questions, drafts) only for signers."""
+    """Audit entries, newest first. Entry contents (questions, drafts) only for auditors."""
     v = conn.execute(VIEWER_SQL, (viewer,)).fetchone()
-    show_payload = bool(v and v[2])
+    show_payload = bool(v and v[3] == "auditor")
     rows = conn.execute(
         """
         SELECT seq, recorded_at, actor, event_type, payload, prev_hash, hash

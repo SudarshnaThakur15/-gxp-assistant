@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from app.assurance_info import catalogue, gate_stats, run_lab
 from app.audit import verify_chain
 from app.config import settings
-from app.db import pool
+from app.db import pool, read_pool
 from app.documents import get_document, list_documents
 from app.governance import proof, sources, trust
 from app.pipeline import ask, public_view
@@ -25,7 +25,9 @@ from app.runs import audit_entries, list_runs, run_detail
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pool.open(wait=True, timeout=30)
+    read_pool.open(wait=True, timeout=30)
     yield
+    read_pool.close()
     pool.close()
 
 
@@ -48,7 +50,7 @@ def health_db() -> dict:
     """End-to-end database check: connect through the pooler, write and read
     inside a transaction, and exercise pgvector."""
     started = time.perf_counter()
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         server_version, database = conn.execute(
             "SELECT current_setting('server_version'), current_database()"
         ).fetchone()
@@ -80,9 +82,16 @@ def health_db() -> dict:
     }
 
 
+_personas: tuple[float, list[dict]] | None = None
+PERSONAS_TTL_S = 60  # users change only through migrations; every page needs the list
+
+
 @app.get("/personas")
 def personas() -> list[dict]:
-    with pool.connection() as conn:
+    global _personas
+    if _personas and time.monotonic() - _personas[0] < PERSONAS_TTL_S:
+        return _personas[1]
+    with read_pool.connection() as conn:
         rows = conn.execute(
             """
             SELECT u.id, u.name, u.title, u.role, u.can_sign, t.name,
@@ -90,28 +99,39 @@ def personas() -> list[dict]:
               FROM users u
               JOIN tenants t ON t.id = u.tenant_id
               LEFT JOIN clients c ON c.id = ANY (u.client_ids)
+             WHERE NOT u.is_test  -- test accounts are for the automated evaluation only
              GROUP BY u.id, t.name
              ORDER BY u.role, u.id
             """
         ).fetchall()
-    return [
+    result = [
         {"id": id_, "name": name, "title": title, "role": role, "can_sign": can_sign,
          "organisation": org, "clients": clients}
         for id_, name, title, role, can_sign, org, clients in rows
     ]
+    _personas = (time.monotonic(), result)
+    return result
+
+
+def _require_auditor(conn, persona: str) -> None:
+    row = conn.execute("SELECT role FROM users WHERE id = %s", (persona,)).fetchone()
+    if row is None or row[0] != "auditor":
+        raise HTTPException(status_code=403, detail="The audit trail is open to auditors; everyone can verify the chain.")
 
 
 @app.get("/audit")
 def audit_endpoint(persona: str, limit: int = 50, before: int | None = None) -> list[dict]:
-    """Newest first. Payloads (questions, drafts) only for signers; the chain itself for everyone."""
-    with pool.connection() as conn:
+    """Newest first, auditors only (it shows who asked what and when). /audit/verify is open to all."""
+    with read_pool.connection() as conn:
+        _require_auditor(conn, persona)
         return audit_entries(conn, persona, limit, before)
 
 
 @app.get("/audit.csv")
 def audit_csv(persona: str) -> Response:
     """The whole audit trail as CSV, with the same payload rule as /audit."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
+        _require_auditor(conn, persona)
         rows = audit_entries(conn, persona, limit=100_000)
     out = io.StringIO()
     writer = csv.writer(out)
@@ -127,7 +147,7 @@ def audit_csv(persona: str) -> Response:
 @app.get("/assurance")
 def assurance_endpoint() -> dict:
     """The rules in plain English, the rule-set fingerprint and live counts per gate."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         return catalogue() | {"stats": gate_stats(conn)}
 
 
@@ -140,7 +160,7 @@ def lab_endpoint() -> dict:
 @app.get("/trust")
 def trust_endpoint(persona: str) -> dict:
     """Trust centre: data boundary, safeguards (some re-checked live) and recent AI calls."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         return trust(conn, persona)
 
 
@@ -153,21 +173,21 @@ def proof_endpoint() -> dict:
 @app.get("/sources")
 def sources_endpoint() -> dict:
     """Where the knowledge base comes from and what the last import did."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         return sources(conn)
 
 
 @app.get("/documents")
 def documents_endpoint(persona: str) -> list[dict]:
     """Controlled documents this persona may see, one row per document with its versions."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         return list_documents(conn, persona)
 
 
 @app.get("/documents/{code}")
 def document_endpoint(code: str, persona: str, version: str | None = None) -> dict:
     """One document version with its sections (default: the version in force)."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         doc = get_document(conn, persona, code, version)
     if doc is None:
         raise HTTPException(status_code=404, detail="No such document, or not visible to you.")
@@ -177,14 +197,14 @@ def document_endpoint(code: str, persona: str, version: str | None = None) -> di
 @app.get("/runs")
 def runs_endpoint(persona: str, filter: str | None = None) -> dict:
     """Question runs visible to this persona, with counts per outcome."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         return list_runs(conn, persona, filter)
 
 
 @app.get("/runs/{seq}")
 def run_endpoint(seq: int, persona: str) -> dict:
     """One run: answer, checks, gate trace, review and audit history, as this persona may see it."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         run = run_detail(conn, persona, seq)
     if run is None:
         raise HTTPException(status_code=404, detail="No run with this number is visible to you.")
@@ -213,7 +233,12 @@ def ask_endpoint(req: AskRequest) -> dict:
     """All 7 gates; the audit record is committed before this returns anything."""
     try:
         with pool.connection() as conn:
+            row = conn.execute("SELECT role FROM users WHERE id = %s", (req.persona,)).fetchone()
+            if row is not None and row[0] == "auditor":  # segregation of duties: auditors are read-only
+                raise HTTPException(status_code=403, detail="Auditors are read-only and cannot ask questions.")
             return public_view(ask(conn, req.persona, req.question))
+    except HTTPException:
+        raise
     except Exception as e:  # e.g. the audit trail could not be written: release nothing
         raise HTTPException(status_code=503, detail=f"Not released: {type(e).__name__}") from e
 
@@ -221,17 +246,38 @@ def ask_endpoint(req: AskRequest) -> dict:
 @app.get("/answers/{ask_seq}")
 def answer_endpoint(ask_seq: int, persona: str) -> dict:
     """A held answer as its requester sees it: still held, released after QA signature, or rejected."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         status = answer_status(conn, persona, ask_seq)
     if status is None:
         raise HTTPException(status_code=404, detail="No held answer with this number is visible to you.")
     return status
 
 
+@app.get("/reviews/count")
+def review_count(persona: str) -> dict:
+    """How many held answers wait for this signer (the inbox badge), without loading the drafts."""
+    with read_pool.connection() as conn:
+        n = conn.execute(
+            """
+            SELECT count(*)
+              FROM audit_log a
+              JOIN users v ON v.id = %(signer)s AND v.can_sign
+              JOIN users q ON q.id = a.payload ->> 'persona'
+             WHERE a.event_type = 'ask' AND a.payload ->> 'decision' = 'held_for_review'
+               AND NOT q.is_test AND q.id <> v.id
+               AND q.tenant_id = v.tenant_id AND q.client_ids <@ v.client_ids
+               AND NOT EXISTS (SELECT 1 FROM audit_log r WHERE r.event_type = 'review'
+                                  AND (r.payload ->> 'ask_seq')::bigint = a.seq)
+            """,
+            {"signer": persona},
+        ).fetchone()[0]
+    return {"waiting": n}
+
+
 @app.get("/reviews")
 def review_queue(persona: str) -> list[dict]:
     """Held answers waiting for this signer's decision."""
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         try:
             return queue(conn, persona)
         except SignatureRefused as e:
@@ -263,5 +309,5 @@ def sign_endpoint(ask_seq: int, req: SignRequest) -> dict:
 
 @app.get("/audit/verify")
 def audit_verify() -> dict:
-    with pool.connection() as conn:
+    with read_pool.connection() as conn:
         return verify_chain(conn)

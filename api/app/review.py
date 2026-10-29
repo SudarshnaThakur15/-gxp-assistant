@@ -52,6 +52,21 @@ SELECT a.seq, a.hash, a.prev_hash, a.record_canonical, a.payload, r.seq, r.hash,
   LEFT JOIN audit_log r ON r.event_type = 'review' AND (r.payload ->> 'ask_seq')::bigint = a.seq
  WHERE a.event_type = 'ask' AND a.payload ->> 'decision' = 'held_for_review'
 """
+# The queue shows the draft and its sources: only those fields, and not the sealed record text
+# (needed only to verify integrity at the moment of signing).
+QUEUE_SQL = """
+SELECT a.seq, a.hash, NULL, NULL,
+       jsonb_build_object('question', a.payload -> 'question', 'persona', a.payload -> 'persona',
+                          'tier', a.payload -> 'tier', 'reasons', a.payload -> 'reasons',
+                          'withheld_draft', a.payload -> 'withheld_draft', 'claims', a.payload -> 'claims',
+                          'retrieval', jsonb_build_object('passages', a.payload -> 'retrieval' -> 'passages')),
+       NULL::bigint, NULL, NULL
+  FROM audit_log a
+  JOIN users q ON q.id = a.payload ->> 'persona' AND NOT q.is_test  -- automated test runs are not real work
+ WHERE a.event_type = 'ask' AND a.payload ->> 'decision' = 'held_for_review'
+   AND NOT EXISTS (SELECT 1 FROM audit_log r WHERE r.event_type = 'review' AND (r.payload ->> 'ask_seq')::bigint = a.seq)
+ ORDER BY a.seq
+"""
 FAILED_ATTEMPTS_SQL = """
 SELECT count(*) FROM audit_log
  WHERE actor = %(actor)s AND event_type = 'signature_refused' AND payload ->> 'code' = 'wrong_password'
@@ -156,7 +171,7 @@ def queue(conn: psycopg.Connection, signer_id: str) -> list[dict]:
         raise SignatureRefused("not_a_signer", "Only users who may sign can open the review queue.")
     visible = _visible_docs(conn, signer_id)
     items = []
-    for seq, hash_, _, _, payload, review_seq, _, _ in _held(conn):
+    for seq, hash_, _, _, payload, review_seq, _, _ in conn.execute(QUEUE_SQL).fetchall():
         content = signed_content(seq, hash_, payload)
         if review_seq is not None or payload["persona"] == signer_id:
             continue

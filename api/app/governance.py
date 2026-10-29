@@ -43,7 +43,7 @@ def trust(conn: psycopg.Connection, viewer: str) -> dict:
     lab = run_lab()
 
     calls, counts = [], {"ai_calls": 0, "tokens": 0, "refused": 0, "not_found": 0, "held": 0, "stopped": 0}
-    for seq, recorded_at, _, _, p, _, req_name, _, _, review in visible_rows(conn, viewer):
+    for seq, recorded_at, _, _, p, _, req_name, _, _, review, _ in visible_rows(conn, viewer):
         screen_llm, generation = (p.get("screen") or {}).get("llm"), p.get("generation")
         used = [x for x in (screen_llm, generation) if x]
         counts["ai_calls"] += len(used)
