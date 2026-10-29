@@ -12,7 +12,7 @@ const PILLS: { filter: Filter | null; label: string }[] = [
   { filter: "released", label: "Answered" },
   { filter: "held", label: "Waiting for QA" },
   { filter: "decided", label: "Decided by QA" },
-  { filter: "refused", label: "Can't answer" },
+  { filter: "refused", label: "Not answered" },
 ];
 
 const EMPTY: Record<string, string> = {
@@ -27,6 +27,7 @@ const TITLE = {
   qa_analyst: ["My questions", "Everything you have asked, and what happened to it."],
   qa_manager: ["Team questions", "Questions from the programmes you cover."],
   auditor: ["All questions", "Every question across both programmes, including automated test runs."],
+  team_member: ["Questions", "Team members answer team requests and do not ask questions."],
 } as const;
 
 export default function RunsPage(props: PageProps<"/runs">) {

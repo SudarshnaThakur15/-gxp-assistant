@@ -217,3 +217,13 @@
   purpose: CRV-220 exists only as a prefilled syringe; must not answer with the syringe shelf life
   split: holdout
   contaminated: true  # its failure (2026-10-28) motivated checks V10/V11
+
+- id: G22
+  persona: test-analyst-a
+  question: Prepare an investigation pack for DEV-2026-027.
+  expect: answer
+  expect_decision: held_for_review
+  must_cite: ["SOP-MIC-070@2.2 §4"]
+  must_not_include: ["likely root cause", "root cause is", "was caused by"]
+  purpose: investigation pack for an open deviation; the AI prepares, the investigator decides (no cause stated)
+  split: tune

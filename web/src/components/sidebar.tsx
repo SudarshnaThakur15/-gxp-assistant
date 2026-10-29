@@ -1,7 +1,7 @@
 import { MobileMenu } from "@/components/mobile-menu";
 import { NavLinks } from "@/components/nav-links";
 import { PersonaSwitcher } from "@/components/persona-switcher";
-import { getReviewCount, settle } from "@/lib/api";
+import { getReviewCount, getTeamCount, settle } from "@/lib/api";
 import { getCurrentPersona } from "@/lib/persona";
 import { AI_MODEL } from "@/lib/site";
 
@@ -9,6 +9,7 @@ const ROLE = {
   qa_analyst: { label: "QA Analyst", note: "Asks questions and sees only their own. A held answer reaches them after QA signs it." },
   qa_manager: { label: "QA Manager", note: "Reviews and e-signs held answers for the programmes they cover." },
   auditor: { label: "Auditor · read-only", note: "Sees every question, answer and audit entry. Cannot ask or sign." },
+  team_member: { label: "Team member", note: "Answers questions the documents could not, for the teams they cover. Cannot ask or sign." },
 };
 
 function Brand() {
@@ -34,7 +35,10 @@ export async function Sidebar() {
   }
   const { current, all } = data;
   const role = ROLE[current.role];
-  const count = current.can_sign ? await settle(getReviewCount(current.id)) : null;
+  const [count, teamCount] = await Promise.all([
+    current.can_sign ? settle(getReviewCount(current.id)) : null,
+    current.teams.length ? settle(getTeamCount(current.id)) : null,
+  ]);
   const waiting = count?.data?.waiting ?? 0;
 
   const viewingAs = (
@@ -45,11 +49,13 @@ export async function Sidebar() {
         <p className="text-sm text-white/70">{role.label}</p>
       </div>
       <p className="text-[13px] leading-snug text-white/65">{role.note}</p>
-      <p className="text-xs text-white/50">{current.clients.join(" · ")}</p>
+      <p className="text-xs text-white/50">
+        {current.teams.length ? `Answers for ${current.teams.map((x) => x.name).join(", ")}` : current.clients.join(" · ")}
+      </p>
       <PersonaSwitcher key={current.id} personas={all} currentId={current.id} />
     </div>
   );
-  const nav = <NavLinks role={current.role} waiting={waiting} />;
+  const nav = <NavLinks role={current.role} waiting={waiting} teamWaiting={teamCount?.data?.waiting ?? 0} />;
 
   return (
     <aside className="bg-ink text-white print:hidden lg:sticky lg:top-0 lg:h-screen lg:w-[264px] lg:shrink-0 lg:overflow-y-auto">

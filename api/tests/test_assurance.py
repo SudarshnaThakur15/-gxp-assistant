@@ -11,6 +11,8 @@ from app.assurance import (
     added_identifiers,
     carried_targets,
     evidence_form,
+    pack_subject,
+    validate_pack,
     injection_offset,
     release,
     screen_rules,
@@ -240,3 +242,35 @@ def test_a_followup_rewrite_may_not_name_a_code_nobody_wrote():
 ])
 def test_that_batch_names_a_batch_unless_it_follows_a_reporting_verb(question, refused):
     assert bool(screen_rules(question, [])) is refused
+
+
+def test_an_investigation_pack_names_exactly_one_deviation():
+    assert pack_subject("Prepare an investigation pack for DEV-2026-027.", OPEN) == "DEV-2026-027"
+    assert pack_subject("What is the root cause of DEV-2026-027?", OPEN) is None
+    assert pack_subject("Prepare an investigation pack for DEV-2026-027 and DEV-2026-014.", OPEN + CLOSED) is None
+
+
+def _pack_claim(n, section, h, text, quote="the quote is long enough"):
+    return {"n": n, "section": section, "hit": h, "text": text, "quote": quote}
+
+
+def test_pack_causes_come_only_from_closed_earlier_records():
+    from dataclasses import replace
+    subject = replace(hit(cid=1, code="DEV-2026-027", doc_type="deviation"), record_state="open")
+    earlier = replace(hit(cid=2, doc_id=2, code="DEV-2026-014", doc_type="deviation"), record_state="closed")
+    sop = hit(cid=3, doc_id=3, code="SOP-MIC-070", doc_type="sop")
+    good = [_pack_claim(1, "subject", subject, "The plate showed 1 CFU."),
+            _pack_claim(2, "earlier_cause", earlier, "DEV-2026-014 documented a wetting step that was too short."),
+            _pack_claim(3, "procedure", sop, "The investigation reviews glove integrity.")]
+    assert [c.status for c in validate_pack("DEV-2026-027", good)] == ["pass", "pass"]
+
+    as_cause = [_pack_claim(1, "earlier_cause", subject, "DEV-2026-027 was caused by a glove breach.")]
+    p1, p2 = validate_pack("DEV-2026-027", as_cause)
+    assert p1.status == "fail" and p2.status == "fail"
+
+    own_words = [_pack_claim(1, "subject", subject, "The growth was probably caused by the intervention.",
+                             quote="one corrective intervention at needle position 2")]
+    assert validate_pack("DEV-2026-027", own_words)[1].status == "fail"
+    recorded = [_pack_claim(1, "subject", subject, "The record says the cause is under investigation.",
+                            quote="the cause is under investigation")]
+    assert validate_pack("DEV-2026-027", recorded)[1].status == "pass"

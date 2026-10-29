@@ -9,7 +9,7 @@ import { getCurrentPersona } from "@/lib/persona";
 export default function TrustPage() {
   return (
     <>
-      <PageHeader eyebrow="Trust centre" title="What leaves the system, and how each safeguard is proven.">
+      <PageHeader eyebrow="Trust centre" title="What data leaves the system, and how each safeguard is checked.">
         Every safeguard below says how it is verified. The ones marked “checked live” were re-checked when this page
         loaded, inside a database transaction that is always rolled back.
       </PageHeader>

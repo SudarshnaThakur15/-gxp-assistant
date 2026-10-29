@@ -4,7 +4,7 @@ import { Suspense } from "react";
 
 import { Chat } from "@/components/chat";
 import { Card, EmptyState, ErrorNote, formatTime, Mono, OutcomePill, PageHeader, RunLink, Skeleton, Stat } from "@/components/ui";
-import { getRun, getRuns, settle, verifyAudit, type Persona } from "@/lib/api";
+import { getRun, getRuns, getTeamRequests, settle, verifyAudit, type Persona } from "@/lib/api";
 import { getCurrentPersona } from "@/lib/persona";
 import { plainReason } from "@/lib/plain";
 
@@ -29,7 +29,7 @@ async function Home({ searchParams }: { searchParams: PageProps<"/">["searchPara
   return <Chat me={me} chatId={null} />;
 }
 
-// --- Auditors: read-only overview ---------------------------------------------------------
+// --- Auditors: read-only console ----------------------------------------------------------
 
 // Verifying the chain recomputes every hash, so it streams in after the rest of the page.
 async function ChainTile() {
@@ -41,23 +41,27 @@ async function ChainTile() {
 }
 
 async function Overview({ me }: { me: Persona }) {
-  const runs = await settle(getRuns(me.id));
+  const [runs, team] = await Promise.all([settle(getRuns(me.id)), settle(getTeamRequests(me.id))]);
   if (!runs.data) return <ErrorNote>API unreachable: {runs.error}</ErrorNote>;
   const c = runs.data.counts;
   const held = runs.data.runs.filter((r) => r.outcome === "held");
+  const waitingOnTeam = (team.data ?? []).filter((r) => r.status === "waiting");
+  const answered = runs.data.runs.filter((r) => r.outcome === "released").length;
+  const share = c.all ? Math.round((answered / c.all) * 100) : 0;
 
   return (
     <>
-      <PageHeader eyebrow="Overview" title="Everything the assistant did, and who decided.">
-        A read-only view across both client programmes. You can open any question, its checks and its audit record,
-        but you cannot ask or sign: auditors stay independent of the work they audit.
+      <PageHeader eyebrow="Auditor console" title="Everything the assistant has done, in one place.">
+        Answers that pass every check go straight to the person who asked. Anything that needs a person waits for QA or
+        for a team. You can open any question, its checks and its audit record, but you can&apos;t ask or sign, so your
+        review stays independent.
       </PageHeader>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Stat value={c.all} label="Questions" caption="across both programmes" />
-        <Stat value={c.released} label="Answered by rules" caption="cited, every check passed" tone="ok" />
+        <Stat value={`${share}%`} label="Answered straight away" caption={`${answered} of ${c.all}, with sources, every check passed`} tone="ok" />
+        <Stat value={waitingOnTeam.length} label="Waiting on a team" caption="waiting for a reply" tone={waitingOnTeam.length ? "wait" : undefined} />
         <Stat value={c.held} label="Waiting for QA" caption="held for a signature" tone={c.held ? "wait" : undefined} />
         <Stat value={c.decided} label="Decided by QA" caption="approved or rejected" />
-        <Stat value={c.refused} label="Can't answer" caption="prohibited or unverifiable" />
+        <Stat value={c.refused} label="Not answered" caption="refused by a rule or failed a check" />
         <Suspense fallback={<Stat value={<span className="inline-block h-8 w-20 animate-pulse rounded bg-sunken" />} label="Audit trail" caption="verifying every entry…" />}>
           <ChainTile />
         </Suspense>
@@ -76,7 +80,19 @@ async function Overview({ me }: { me: Persona }) {
             </ul>
           )}
         </Card>
-        <Card title="Latest questions" aside={<Link href="/runs" className="text-sm font-medium text-brand-text hover:underline">All →</Link>}>
+        <Card title={`Waiting on a team (${waitingOnTeam.length})`} aside={<Link href="/team-input" className="text-sm font-medium text-brand-text hover:underline">Team input →</Link>}>
+          {waitingOnTeam.length === 0 ? <EmptyState>No question is waiting for a team&apos;s answer.</EmptyState> : (
+            <ul className="flex flex-col gap-2">
+              {waitingOnTeam.slice(0, 6).map((r) => (
+                <li key={r.seq} className="rounded-xl border border-line-soft p-3">
+                  <p className="text-xs text-faint"><Mono>#{r.ask_seq}</Mono> · {r.asked_by.name} · for {r.team.name}{r.test && " · test run"}</p>
+                  <RunLink seq={r.ask_seq}>{r.question}</RunLink>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+        <Card className="lg:col-span-2" title="Latest questions" aside={<Link href="/runs" className="text-sm font-medium text-brand-text hover:underline">All →</Link>}>
           <ul className="divide-y divide-line-soft">
             {runs.data.runs.slice(0, 8).map((r) => (
               <li key={r.seq} className="flex flex-col gap-1 py-2.5">

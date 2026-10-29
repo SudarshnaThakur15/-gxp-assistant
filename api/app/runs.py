@@ -16,10 +16,14 @@ from collections import defaultdict
 import psycopg
 
 from app.review import manifestation, recorded_citations
+from app.team import TEAMS
 
 NOT_FOUND = "Not found in the approved documentation available to you."
 FAILURE = re.compile(r"((?:screening|generation|follow-up) failed: \w+)")
 LEGACY_CHAT = re.compile(r"^r(\d+)$")  # a question asked before chats existed is a chat of one, "r<seq>"
+PACK_ORDER = ["subject", "similar_case", "earlier_cause", "earlier_capa", "procedure"]
+DEVIATION = re.compile(r"\bDEV-\d{4}-\d{3}\b")
+DECISION_RULES = ("S2", "S3", "S4")  # classification, root cause, CAPA: a pack can help instead
 
 
 def public_reason(text: str | None) -> str | None:
@@ -34,9 +38,9 @@ def public_reasons(payload: dict) -> list[str]:
 
 
 LABELS = {
-    "released": "Released by rules", "not_found": "Released by rules: not found",
-    "held": "Held for review", "approved": "Released after QA review",
-    "rejected": "Rejected in QA review", "refused": "Refused",
+    "released": "Answered", "not_found": "Not found in the documents",
+    "held": "Waiting for QA sign-off", "approved": "Approved by QA",
+    "rejected": "Rejected by QA", "refused": "Not answered",
 }
 FILTERS = {  # list filter → outcomes it includes
     "released": ("released", "not_found"), "held": ("held",),
@@ -45,6 +49,7 @@ FILTERS = {  # list filter → outcomes it includes
 
 VIEWER_SQL = "SELECT id, name, can_sign, role FROM users WHERE id = %s"
 TITLES_SQL = "SELECT code, version, title FROM documents WHERE code = ANY (%s)"
+NAMES_SQL = "SELECT id, name FROM users WHERE id = ANY (%s)"
 VISIBLE_RUNS = """
   FROM audit_log a
   JOIN users q ON q.id = a.payload ->> 'persona'
@@ -74,7 +79,8 @@ HISTORY_SQL = """
 SELECT seq, recorded_at, actor, event_type, payload, hash
   FROM audit_log
  WHERE seq = ANY (%(seqs)s)
-    OR (event_type IN ('review', 'signature_refused') AND (payload ->> 'ask_seq')::bigint = ANY (%(seqs)s))
+    OR (event_type IN ('review', 'signature_refused', 'team_request', 'team_answer')
+        AND (payload ->> 'ask_seq')::bigint = ANY (%(seqs)s))
  ORDER BY seq
 """
 CHAT_SEQS_SQL = """
@@ -171,7 +177,31 @@ def _event_text(event_type: str, payload: dict) -> str:
         return f"Question asked by {payload['persona']}; {LABELS[outcome(payload, None)].lower()} (tier {payload['tier']})"
     if event_type == "review":
         return manifestation(payload) + (f" Reason: {payload['reason']}" if payload.get("reason") else "")
+    if event_type == "team_request":
+        return f"Question sent to {TEAMS[payload['team']]} by {payload['persona']}: “{payload['question']}”"
+    if event_type == "team_answer":
+        return f"{TEAMS[payload['team']]} answered ({payload['persona']}): “{payload['answer']}”"
     return f"Signature attempt refused ({payload.get('code')}): {payload.get('detail')}"
+
+
+def _pack_sections(p: dict) -> list[dict]:
+    """An investigation pack's claims by part, numbered like its citations."""
+    passages = {x["id"] for x in (p.get("retrieval") or {}).get("passages", [])}
+    markers: dict[str, int] = {}
+    parts: dict[str, list] = {}
+    for c in p.get("claims", []):
+        if c["source_id"] in passages:
+            n = markers.setdefault(c["source_id"], len(markers) + 1)
+            parts.setdefault(c.get("section") or "subject", []).append({"text": c["text"], "n": n})
+    return [{"section": s, "items": parts[s]} for s in PACK_ORDER if s in parts]
+
+
+def _pack_offer(p: dict, o: str) -> str | None:
+    """A refused root-cause, classification or CAPA question about a named deviation: offer a pack instead."""
+    if o != "refused" or not any(r.split(":")[0] in DECISION_RULES for r in p.get("reasons") or []):
+        return None
+    found = DEVIATION.findall(f"{p['question']} {p.get('standalone_question') or ''}".upper())
+    return found[0] if found else None
 
 
 def _titled(citations: list[dict], titles: dict) -> list[dict]:
@@ -180,7 +210,21 @@ def _titled(citations: list[dict], titles: dict) -> list[dict]:
             | {"title": c.get("title") or titles.get((c["doc"], c["version"]))} for c in citations]
 
 
-def _detail(row: tuple, viewer: str, is_signer: bool, sees_drafts: bool, history: list[dict]) -> dict:
+def _team_input(events: list[tuple]) -> dict | None:
+    """The question this run sent to a team, and the team's answer once given."""
+    asked = next((e for e in events if e[0] == "team_request"), None)
+    if asked is None:
+        return None
+    answered = next((e for e in events if e[0] == "team_answer"), None)
+    return {"request_seq": asked[1], "team": {"id": asked[2]["team"], "name": TEAMS[asked[2]["team"]]},
+            "question": asked[2]["question"], "asked_at": asked[3],
+            "status": "answered" if answered else "waiting",
+            "answer": None if answered is None else {"text": answered[2]["answer"], "by": answered[2]["persona"],
+                                                      "recorded_at": answered[3]}}
+
+
+def _detail(row: tuple, viewer: str, is_signer: bool, sees_drafts: bool, history: list[dict],
+            team_events: list[tuple]) -> dict:
     seq, recorded_at, hash_, prev_hash, p, req_id, req_name, review_seq, review_hash, review, is_test = row
     o = outcome(p, review)
 
@@ -193,6 +237,8 @@ def _detail(row: tuple, viewer: str, is_signer: bool, sees_drafts: bool, history
         answer = {"text": NOT_FOUND, "withheld": False}
     if answer and o != "not_found":
         answer["citations"] = recorded_citations(p)
+        if p.get("pack"):
+            answer["sections"] = _pack_sections(p)
         answer["notices"] = p.get("notices", []) if o == "released" else []
     show_details = answer is not None or sees_drafts  # check details quote the draft
     checks = [c if show_details else c | {"detail": None} for c in p.get("checks") or []]
@@ -200,6 +246,7 @@ def _detail(row: tuple, viewer: str, is_signer: bool, sees_drafts: bool, history
         "seq": seq, "recorded_at": recorded_at, "hash": hash_, "prev_hash": prev_hash,
         "question": p["question"], "requested_by": {"id": req_id, "name": req_name}, "test": is_test,
         "chat": chat_of(p, seq), "standalone_question": p.get("standalone_question"),
+        "pack": p.get("pack"), "pack_offer": _pack_offer(p, o),
         "outcome": o, "label": LABELS[o], "decision": p["decision"], "answer_type": p["answer_type"],
         "tier": p["tier"], "reasons": public_reasons(p), "error": public_reason(p.get("error")),
         "answer": answer, "rule_sources": p.get("refusal_sources") or [],
@@ -211,6 +258,7 @@ def _detail(row: tuple, viewer: str, is_signer: bool, sees_drafts: bool, history
             "content_hash": review["content_hash"]},
         "can_review": is_signer and o == "held" and viewer != req_id,
         "history": history,
+        "team_input": _team_input(team_events),
     }
 
 
@@ -224,16 +272,23 @@ def run_details(conn: psycopg.Connection, viewer: str, seqs: list[int]) -> list[
     v = conn.execute(VIEWER_SQL, (viewer,)).fetchone()
     is_signer = bool(v and v[2])
     sees_drafts = is_signer or bool(v and v[3] == "auditor")  # reviewers, and read-only auditors
-    history = defaultdict(list)
+    history, team_events = defaultdict(list), defaultdict(list)
     for s, t, actor, et, pl, h in conn.execute(HISTORY_SQL, {"seqs": [r[0] for r in rows]}).fetchall():
-        history[s if et == "ask" else int(pl["ask_seq"])].append(
+        ask_seq = s if et == "ask" else int(pl["ask_seq"])
+        history[ask_seq].append(
             {"seq": s, "recorded_at": t, "actor": actor, "event_type": et, "hash": h, "text": _event_text(et, pl)})
-    details = [_detail(row, viewer, is_signer, sees_drafts, history[row[0]]) for row in rows]
+        if et.startswith("team_"):
+            team_events[ask_seq].append((et, s, pl, t))
+    details = [_detail(row, viewer, is_signer, sees_drafts, history[row[0]], team_events[row[0]]) for row in rows]
 
     cited = [c for d in details for c in d["rule_sources"] + ((d["answer"] or {}).get("citations") or [])]
     titles = {}
     if codes := list({c["doc"] for c in cited}):
         titles = {(code, ver): title for code, ver, title in conn.execute(TITLES_SQL, (codes,)).fetchall()}
+    if answered := [d["team_input"]["answer"] for d in details if d["team_input"] and d["team_input"]["answer"]]:
+        names = dict(conn.execute(NAMES_SQL, (list({a["by"] for a in answered}),)).fetchall())
+        for a in answered:
+            a["by_name"] = names.get(a["by"])
     for d in details:
         d["rule_sources"] = _titled(d["rule_sources"], titles)
         if d["answer"] and "citations" in d["answer"]:

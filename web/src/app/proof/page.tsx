@@ -7,7 +7,7 @@ import { getAssurance, getProof, settle } from "@/lib/api";
 export default function ProofPage() {
   return (
     <>
-      <PageHeader eyebrow="Proof and value" title="Measured against questions with known right answers.">
+      <PageHeader eyebrow="Proof and value" title="Test results on questions with known answers.">
         A fixed set of 21 realistic questions, each with the outcome it should get, decided before the system was
         tuned. Holdout questions were never used for tuning; any that were looked at while fixing something are marked
         as contaminated and reported separately.

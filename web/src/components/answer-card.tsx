@@ -1,9 +1,28 @@
 import Link from "next/link";
 
+import { PackButton } from "@/components/pack-button";
 import { Tabs } from "@/components/tabs";
+import { AskTeamForm } from "@/components/team-forms";
 import { ByBadge, CheckList, CitationChip, Citations, formatTime, Mono, Pill, TONE_PILL } from "@/components/ui";
-import type { Citation, Gate, RunDetail } from "@/lib/api";
+import type { Citation, Gate, Outcome, PackSection, RunDetail } from "@/lib/api";
 import { GATE_PLAIN, plainReasons, STATUS } from "@/lib/plain";
+
+// Who must act next, for every outcome.
+const NEXT: Record<Outcome, string> = {
+  released: "Passed every check, so it was answered straight away. QA and auditors can review it at any time.",
+  not_found: "The documents don't answer this. The person who asked can send the question to a team.",
+  held: "A QA Manager has to review and sign this before it can be used.",
+  approved: "Approved and signed by a QA Manager. It can be used.",
+  rejected: "Rejected by a QA Manager. Do not use it.",
+  refused: "Not answered. The reason is shown above.",
+};
+
+// The tier, in words a reader understands without knowing the scale.
+const RISK: Record<string, string> = { T1: "Low risk", T2: "Medium risk", T3: "High risk" };
+
+function TabHeading({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-base font-semibold text-strong">{children}</h3>;
+}
 
 // One answer: a plain status line and the answer first; the proof one click away in tabs.
 export function AnswerCard({ run, viewerId }: { run: RunDetail; viewerId: string }) {
@@ -19,6 +38,11 @@ export function AnswerCard({ run, viewerId }: { run: RunDetail; viewerId: string
         <p className="flex items-center gap-2 font-semibold">
           <span aria-hidden className="text-base">{status.icon}</span>
           {status.title}
+          {run.tier !== "n/a" && (
+            <span className="rounded-md bg-white/70 px-1.5 py-0.5 font-mono text-[11px] font-semibold" title={`Tier ${run.tier.slice(1)} of 3, set by the rules from the kind of question`}>
+              {RISK[run.tier] ?? run.tier}
+            </span>
+          )}
         </p>
         <p className="text-xs opacity-80">
           Run <Mono>#{run.seq}</Mono> · {formatTime(run.recorded_at)}{run.test && " · test run"}
@@ -30,8 +54,8 @@ export function AnswerCard({ run, viewerId }: { run: RunDetail; viewerId: string
             { id: "answer", label: "Answer", content: <AnswerTab run={run} isRequester={isRequester} /> },
             { id: "sources", label: "Sources", count: citations.length || run.rule_sources.length, content: <SourcesTab run={run} /> },
             { id: "checks", label: "Checks", count: counted || undefined, content: <ChecksTab run={run} passed={passed} counted={counted} /> },
-            { id: "trace", label: "How it ran", content: <TraceTab run={run} /> },
-            { id: "record", label: "Record", content: <RecordTab run={run} /> },
+            { id: "trace", label: "Steps", content: <TraceTab run={run} /> },
+            { id: "record", label: "History", content: <RecordTab run={run} /> },
           ]}
         />
       </div>
@@ -50,12 +74,12 @@ function Reasons({ run, title, sources = [] }: { run: RunDetail; title: string; 
       </ul>
       {sources.length > 0 && (
         <div className="mt-4 border-t border-line-soft pt-3">
-          <p className="mb-2.5 text-sm font-semibold text-strong">Where this rule comes from</p>
+          <p className="mb-2.5 text-sm font-semibold text-strong">Based on these documents</p>
           <Citations citations={sources} />
         </div>
       )}
       <p className="mt-3 text-xs text-faint">
-        Decided by fixed rules, not by the AI.{sources.length > 0 && " Quoted word for word from the approved versions in force."}
+        This is a fixed rule, applied the same way every time.{sources.length > 0 && " The quotes are copied exactly from the current approved versions."}
       </p>
     </div>
   );
@@ -78,17 +102,20 @@ function AnswerTab({ run, isRequester }: { run: RunDetail; isRequester: boolean 
       )}
       {run.outcome === "refused" && (
         <p className="text-[15px] leading-relaxed text-body">
-          Nothing was released. You can ask what a procedure or record says; decisions stay with the responsible people.
+          {run.rule_sources.length > 0 || run.tier === "T3"
+            ? "The assistant can tell you what a procedure or record says, but it can't make this decision."
+            : "The draft answer didn't pass the automatic checks, so it isn't shown."}
         </p>
       )}
       {a && (
         <div className="flex flex-col gap-3">
           {a.withheld && (
             <p className="w-fit rounded-md bg-wait-bg px-2 py-1 text-xs font-semibold text-wait-text">
-              Draft · not released · visible to QA and auditors only
+              Draft, not yet approved · only QA and auditors can see it
             </p>
           )}
-          <p className="text-[17px] leading-relaxed text-strong">{a.text}</p>
+          {a.sections && run.pack ? <PackSections subject={run.pack.subject} sections={a.sections} />
+            : <p className="text-[17px] leading-relaxed text-strong">{a.text}</p>}
           {a.notices?.map((n) => (
             <p key={n} className="rounded-lg bg-brand-soft px-3 py-2 text-sm text-brand-text">{n}</p>
           ))}
@@ -109,13 +136,94 @@ function AnswerTab({ run, isRequester }: { run: RunDetail; isRequester: boolean 
         </div>
       )}
       {run.review && <p className="text-sm text-muted">{run.review.signature}</p>}
-      {run.outcome === "not_found" && (
+      {run.outcome === "not_found" && !run.team_input && (
         <p className="text-sm text-muted">
           Try naming the document (for example SOP-QA-012), or check that the question is about a programme you work on.
         </p>
       )}
-      {run.outcome === "held" && <Reasons run={run} title="Why a person checks it first" />}
+      <TeamInputBox run={run} isRequester={isRequester} />
+      {run.outcome === "held" && <Reasons run={run} title="Why QA needs to check it" />}
       {run.outcome === "refused" && <Reasons run={run} title="Why it can't be answered" sources={run.rule_sources} />}
+      {run.pack_offer && isRequester && <PackButton deviation={run.pack_offer} chatId={run.chat.id} />}
+      <p className="flex flex-wrap items-baseline gap-x-2 border-t border-line-soft pt-3 text-sm">
+        <span className="font-semibold text-strong">Next step</span>
+        <span className="text-body">
+          {run.team_input?.status === "waiting"
+            ? `Waiting for ${run.team_input.team.name} to reply.`
+            : run.team_input
+              ? `${run.team_input.team.name} replied. Their answer is not from an approved document.`
+              : NEXT[run.outcome]}
+        </span>
+      </p>
+    </div>
+  );
+}
+
+const PACK_HEADINGS: Record<PackSection["section"], string> = {
+  subject: "What the record says",
+  similar_case: "Similar earlier deviations",
+  earlier_cause: "Causes found before, in closed records",
+  earlier_capa: "CAPAs taken before",
+  procedure: "What the procedures require",
+};
+
+// An investigation pack: what the records and procedures say, grouped for the investigator. No conclusion.
+function PackSections({ subject, sections }: { subject: string; sections: PackSection[] }) {
+  const has = (s: PackSection["section"]) => sections.some((x) => x.section === s);
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted">
+        Investigation pack for <span className="font-semibold text-strong">{subject}</span>. It collects what the records
+        and procedures say. It does not decide the root cause, the classification or the CAPA: the investigator does.
+      </p>
+      {sections.map((s) => (
+        <section key={s.section} className="flex flex-col gap-1.5">
+          <h4 className="text-sm font-semibold text-strong">{s.section === "subject" ? `What ${subject} records` : PACK_HEADINGS[s.section]}</h4>
+          <ul className="flex list-disc flex-col gap-1 pl-5 text-[15px] leading-relaxed text-body">
+            {s.items.map((item, i) => <li key={i}>{item.text} <span className="text-xs font-semibold text-faint">[{item.n}]</span></li>)}
+          </ul>
+        </section>
+      ))}
+      {!has("similar_case") && !has("earlier_cause") && (
+        <p className="rounded-lg bg-sunken px-3 py-2 text-sm text-muted">
+          No earlier closed deviation of the same kind was found in the records you can see, so there are no earlier causes to show.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// A question the approved documents could not answer, put to the team that owns that kind of document.
+function TeamInputBox({ run, isRequester }: { run: RunDetail; isRequester: boolean }) {
+  const t = run.team_input;
+  if (t) {
+    return (
+      <div className="rounded-xl border border-line-soft p-4">
+        <p className="text-sm font-semibold text-strong">{t.answer ? `Answer from ${t.team.name}` : `Sent to ${t.team.name}`}</p>
+        <p className="mt-1 text-sm text-muted">“{t.question}”</p>
+        {t.answer ? (
+          <>
+            <p className="mt-3 text-[15px] leading-relaxed text-strong">{t.answer.text}</p>
+            <p className="mt-2 text-xs text-faint">
+              Answered by {t.answer.by_name ?? t.answer.by} · {formatTime(t.answer.recorded_at)}. This is the team&apos;s own
+              answer, not taken from an approved document, so it was not checked automatically.
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-wait-text">Waiting for a reply. The question and the reply are both saved in the audit trail.</p>
+        )}
+      </div>
+    );
+  }
+  if (!isRequester || run.outcome !== "not_found") return null;
+  return (
+    <div className="rounded-xl bg-page p-4">
+      <p className="text-sm font-semibold text-strong">Ask a team</p>
+      <p className="mb-3 mt-1 text-sm text-muted">
+        The documents don&apos;t cover this. You can ask the team responsible for this area. Their reply is saved in the
+        audit trail and shown here, marked as theirs.
+      </p>
+      <AskTeamForm askSeq={run.seq} question={run.standalone_question ?? run.question} />
     </div>
   );
 }
@@ -125,6 +233,7 @@ function SourcesTab({ run }: { run: RunDetail }) {
   if (citations.length) {
     return (
       <div className="flex flex-col gap-4">
+        <TabHeading>Quoted from these documents</TabHeading>
         <Citations citations={citations} />
         <p className="text-xs text-faint">Only approved versions in force are quoted, and every quote was checked word for word.</p>
       </div>
@@ -133,6 +242,7 @@ function SourcesTab({ run }: { run: RunDetail }) {
   if (run.rule_sources.length) {
     return (
       <div className="flex flex-col gap-4">
+        <TabHeading>The documents behind this rule</TabHeading>
         <p className="text-sm text-body">
           Nothing was searched: a fixed rule stopped the question first. These approved documents are what the rule rests on.
         </p>
@@ -153,9 +263,10 @@ function ChecksTab({ run, passed, counted }: { run: RunDetail; passed: number; c
   }
   return (
     <div className="flex flex-col gap-3">
+      <TabHeading>Automatic checks on this answer</TabHeading>
       <p className="text-sm text-body">
-        <span className="font-semibold text-strong">{passed} of {counted}</span> checks passed. Every check is fixed code
-        with no AI inside, rule set <Mono>{run.ruleset.version}</Mono>.
+        <span className="font-semibold text-strong">{passed} of {counted}</span> checks passed. The checks are ordinary code,
+        not AI, so they give the same result every time (rule set <Mono>{run.ruleset.version}</Mono>).
       </p>
       <CheckList checks={run.checks} />
       {run.checks.some((c) => c.detail === null) && (
@@ -197,8 +308,8 @@ function GateDetail({ gate: g }: { gate: Gate }) {
         <div className={small}>
           {g.followup && (
             <p>
-              Follow-up rewritten by the AI as “{g.followup}”. The rules screened it as typed, as rewritten and with what
-              the chat named earlier.
+              The AI read this follow-up as “{g.followup}”. The rules checked both versions, together with anything the
+              chat mentioned earlier.
             </p>
           )}
           {g.rules && g.rules.length > 0 && <p>Rule fired: {g.rules.map((r) => `${r.rule} ${r.title}`).join("; ")}</p>}
@@ -274,7 +385,7 @@ function RecordTab({ run }: { run: RunDetail }) {
         <Link href={`/runs/${run.seq}/evidence`} className="rounded-lg bg-ink px-3.5 py-2 text-sm font-semibold text-white hover:bg-ink-2">
           Inspection evidence pack
         </Link>
-        <Pill tone="neutral">Every step above is in the tamper-evident audit trail</Pill>
+        <Pill tone="neutral">All of this is stored in the audit trail, which cannot be edited</Pill>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import type { Check, Citation, Outcome } from "@/lib/api";
+import type { Check, Citation, Outcome, DocRef } from "@/lib/api";
 import { CHECK_PLAIN, SHORT, STATUS, type Tone } from "@/lib/plain";
 import { LinkPending } from "@/components/pending";
 
@@ -62,9 +62,9 @@ export function decisionOutcome(decision: string, answerType: string): Outcome {
 
 export function TierChip({ tier }: { tier: string }) {
   const title: Record<string, string> = {
-    T1: "T1: knowledge answer, released by rules",
-    T2: "T2: needs QA review and e-signature",
-    T3: "T3: prohibited decision, refused",
+    T1: "Tier 1: answered straight away",
+    T2: "Tier 2: needs a QA review and signature",
+    T3: "Tier 3: a decision for people, not answered",
   };
   return (
     <span title={title[tier] ?? "No tier: the request failed safely"}
@@ -79,8 +79,8 @@ export function ByBadge({ by, model }: { by: string; model?: string | null }) {
   if (by === "AI") {
     return <Pill tone="wait" className="uppercase tracking-wide">AI{model ? ` · ${model}` : ""}</Pill>;
   }
-  if (by.includes("AI")) return <Pill tone="neutral">Rules + AI · stricter wins</Pill>;
-  return <Pill tone="neutral">Rules · no AI</Pill>;
+  if (by.includes("AI")) return <Pill tone="neutral">Rules and AI</Pill>;
+  return <Pill tone="neutral">Rules only</Pill>;
 }
 
 export function Mono({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -105,6 +105,21 @@ export function CitationChip({ c }: { c: Pick<Citation, "doc" | "version" | "sec
     <Link href={citationHref(c)}
       className="rounded-md bg-brand-soft px-1.5 py-0.5 font-mono text-[0.8rem] font-medium text-brand-text transition-colors hover:bg-brand-tint">
       {citationRef(c)}
+    </Link>
+  );
+}
+
+// A clause of a controlled document, resolved against the library when the page loaded.
+export function DocRefLink({ r }: { r: DocRef }) {
+  if (r.external) {
+    return <a href={r.external} target="_blank" rel="noreferrer" className="font-medium text-brand-text hover:underline">{r.label} ↗</a>;
+  }
+  if (!r.resolved || !r.version) {
+    return <span className="text-fail-text" title="This reference no longer resolves to an in-force section">{r.label} (not found)</span>;
+  }
+  return (
+    <Link href={citationHref({ doc: r.doc, version: r.version, section: r.section })} className="font-medium text-brand-text hover:underline">
+      {r.label}
     </Link>
   );
 }

@@ -49,11 +49,10 @@ function PendingTurn({ question }: { question: string }) {
       <div role="status" aria-live="polite" className="rounded-card border border-line bg-white px-5 py-4 shadow-card">
         <p className="flex items-center gap-2 text-sm font-semibold text-strong">
           <Spinner className="h-4 w-4 text-brand" />
-          Checking your question
+          Working on your answer
         </p>
         <p className="mt-1 text-sm text-muted">
-          Screening it, searching the approved documents, drafting, checking every claim and recording the result.
-          Usually 5–20 seconds.
+          Searching the documents and checking the draft. This usually takes 5 to 20 seconds.
         </p>
       </div>
     </div>

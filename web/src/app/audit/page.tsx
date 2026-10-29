@@ -11,7 +11,7 @@ const PAGE_SIZE = 50;
 export default function AuditPage(props: PageProps<"/audit">) {
   return (
     <>
-      <PageHeader eyebrow="Audit trail" title="Every step, recorded before anything is released.">
+      <PageHeader eyebrow="Audit trail" title="Every action, in order, recorded before anything is shown.">
         Each entry stores the hash of the entry before it, so changing any past entry breaks every link after it.
         The database refuses edits and deletions, and verification recomputes every hash from scratch.
       </PageHeader>

@@ -7,7 +7,7 @@ import { getSources, settle } from "@/lib/api";
 export default function SourcesPage() {
   return (
     <>
-      <PageHeader eyebrow="Document sources" title="Where the knowledge comes from, and what was turned away.">
+      <PageHeader eyebrow="Connected systems" title="Where the documents come from, and which files were rejected.">
         In this demo the documents arrive by file import, not a live connection to a document management system. Every
         import checks each file&apos;s metadata first: anything incomplete is rejected and listed here, never quietly
         loaded.

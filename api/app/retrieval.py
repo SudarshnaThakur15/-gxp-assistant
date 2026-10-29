@@ -155,7 +155,9 @@ def pick_named(rows: list[dict], codes: list[str], budget: int = MAX_NAMED_CHUNK
     return sorted(chosen, key=lambda r: (order.get(r["code"], len(order)), r["ordinal"]))
 
 
-def retrieve(conn: psycopg.Connection, persona: str, question: str) -> Retrieval:
+def retrieve(conn: psycopg.Connection, persona: str, question: str, others: int | None = None) -> Retrieval:
+    """`others`: passages to add besides the named documents (an investigation pack needs room for related
+    records and procedures); by default named documents and the rest share TOP_K."""
     t0 = time.perf_counter()
     qv = to_pgvector(embed_query(question))
     t1 = time.perf_counter()
@@ -169,7 +171,7 @@ def retrieve(conn: psycopg.Connection, persona: str, question: str) -> Retrieval
     named = pick_named([r for r in hit_rows if r["is_named"]], codes)
     named_ids = {r["chunk_id"] for r in named}
     ranked = sorted((r for r in hit_rows if r["chunk_id"] not in named_ids), key=lambda r: r["score"], reverse=True)
-    picked = named + ranked[:max(TOP_K - len(named), 0)]
+    picked = named + ranked[:others if others is not None else max(TOP_K - len(named), 0)]
     hits = [Hit(**{k: r[k] for k in HIT_FIELDS}) for r in picked]
     best = max((h.similarity for h in hits), default=0.0)
 

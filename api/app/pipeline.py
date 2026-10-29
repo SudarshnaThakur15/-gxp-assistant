@@ -17,6 +17,7 @@ ask() returns the internal outcome, including a withheld draft for reviewers and
 evaluation; public_view() is the only thing a requester may see.
 """
 
+import re
 import secrets
 import time
 from dataclasses import asdict
@@ -50,6 +51,15 @@ SELECT d.code, d.version, d.title, c.section_path, c.page, c.text, d.fingerprint
    AND d.tenant_id IN (u.tenant_id, 'public') AND c.section_path LIKE %(section)s
  ORDER BY c.ordinal
 """
+# The open deviation an investigation pack is for: its text finds related records and procedures.
+SUBJECT_SQL = """
+SELECT d.title, string_agg(c.text, ' ' ORDER BY c.ordinal)
+  FROM chunks c JOIN documents d ON d.id = c.document_id
+ WHERE d.code = %s AND d.status = 'effective'
+ GROUP BY d.title
+"""
+PACK_OTHERS = 5  # related records and procedures, besides the documents the subject names
+
 # A chat's turns so far, with the QA decision on any that were held.
 CHAT_TURNS_SQL = """
 SELECT a.seq, a.payload, r.payload ->> 'outcome'
@@ -147,7 +157,9 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
     chat = {"id": chat_id or secrets.token_hex(8), "turn": len(earlier) + 1,
             "previous": earlier[-1]["seq"] if earlier else None}
     carried = assurance.carried_targets(question, [x for e in earlier for x in (e["question"], e["asked"])])
-    if earlier:
+    pack_typed = bool(re.search(assurance.PACK_REQUEST, question, re.I)) and any(
+        c.startswith("DEV-") for c in DOC_REF.findall(question.upper()))  # self-contained: nothing to rewrite
+    if earlier and not pack_typed:
         t = time.perf_counter()
         _end_read_transaction(conn)
         try:
@@ -171,10 +183,10 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
     rows = conn.execute(PERSONA_SQL, {"persona": persona,
                                       "codes": DOC_REF.findall(" ".join(texts).upper())}).fetchall()
     screen = {"refused": False, "decided_by": "rules", "rules": [], "ai_intent": None}
+    named = [{"code": c, "doc_type": dt, "record_state": rs} for _, c, dt, rs in rows if c]
     if not rows:
         screen.update(refused=True, rules=[{"rule": "S0", "title": "Unknown user"}])
-    elif fired := assurance.screen_texts(texts, [{"code": c, "doc_type": dt, "record_state": rs}
-                                                  for _, c, dt, rs in rows if c]):
+    elif fired := assurance.screen_texts(texts, named):
         screen.update(refused=True, rules=fired)
     elif answer_type is None:
         _end_read_transaction(conn)
@@ -190,9 +202,16 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
     elif answer_type is None and screen["ai_intent"] == "off_topic":
         answer_type = "not_found"
 
+    # An investigation pack for one named deviation: the AI prepares, the investigator decides
+    subject = assurance.pack_subject(asked, named) if answer_type is None else None
+
     # 2 RETRIEVE
-    if answer_type is None:
+    if answer_type is None and subject:
+        title, text = conn.execute(SUBJECT_SQL, (subject,)).fetchone()
+        r = retrieval.retrieve(conn, persona, f"{subject} {title}. {text[:700]}", others=PACK_OTHERS)
+    elif answer_type is None:
         r = retrieval.retrieve(conn, persona, asked)
+    if r is not None:
         hits = r.hits
         ms["retrieve"] = sum(r.ms.values())
         if not r.found:
@@ -204,7 +223,8 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
         _end_read_transaction(conn)
         t = time.perf_counter()
         try:
-            draft, gen_meta = answer.generate(asked, hits, max_wait_s)
+            draft, gen_meta = (answer.generate_pack(subject, hits, max_wait_s) if subject
+                               else answer.generate(asked, hits, max_wait_s))
             answer_type = "answer" if draft["status"] == "answered" else "not_found"
         except Exception as e:
             answer_type, error, error_detail = "error", f"generation failed: {type(e).__name__}", str(e)[:400]
@@ -217,6 +237,8 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
         if draft["status"] == "answered":
             in_force = dict(conn.execute(IN_FORCE_SQL, (list({h.document_id for h in hits}),)).fetchall())
         checks, resolved, notices = assurance.validate(asked, draft, hits, in_force, injected)
+        if subject and resolved:
+            checks += assurance.validate_pack(subject, resolved)
         if injected:
             notices.append(INJECTION_NOTICE)
         ms["validate"] = _ms(t)
@@ -248,7 +270,7 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
             message, citations = "Refused. The draft answer could not be verified against the approved documents.", []
             reasons = failed + reasons
     elif decision == "held_for_review":
-        message = ("Held for review. This answer must be reviewed and electronically signed by a QA Manager "
+        message = ("Waiting for QA sign-off. A QA Manager has to review and sign this answer "
                    "before it can be used.")
     elif answer_type == "not_found":
         message, citations = NOT_FOUND, []
@@ -297,8 +319,11 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
                           "page": h.page, "document_fingerprint": h.fingerprint, "score": round(h.score, 5),
                           "injection_flagged": source_id(h) in injected} for h in hits]},
         "generation": None if gen_meta is None else gen_meta | {
-            "prompt": {"version": answer.PROMPT_VERSION, "fingerprint": answer.PROMPT_FINGERPRINT}},
+            "prompt": {"version": answer.PACK_PROMPT_VERSION, "fingerprint": answer.PACK_PROMPT_FINGERPRINT} if subject
+            else {"version": answer.PROMPT_VERSION, "fingerprint": answer.PROMPT_FINGERPRINT}},
+        "pack": {"subject": subject} if subject else None,
         "claims": [{"n": c["n"], "text": c["text"], "quote": c["quote"], "source_id": c["source_id"],
+                    "section": c.get("section"),
                     "source": None if c["hit"] is None else f"{c['hit'].code} v{c['hit'].version} §{c['hit'].section}"}
                    for c in resolved],
         "checks": [asdict(c) for c in checks],

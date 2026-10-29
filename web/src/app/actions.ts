@@ -8,7 +8,7 @@ import { getPersonas, postJson, type AskResult, type SignResult } from "@/lib/ap
 import { getCurrentPersona, PERSONA_COOKIE } from "@/lib/persona";
 
 // Where each role starts: the QA Manager's work is the review inbox.
-const HOME = { qa_analyst: "/", qa_manager: "/reviews", auditor: "/" } as const;
+const HOME = { qa_analyst: "/", qa_manager: "/reviews", auditor: "/", team_member: "/team-input" } as const;
 
 export async function switchPersona(id: string) {
   const persona = (await getPersonas()).find((p) => p.id === id);
@@ -39,7 +39,7 @@ export async function askQuestion(question: string, chatId: string | null): Prom
     return {
       error: res.status === 404
         ? "This chat can't be continued. Start a new chat."
-        : `Nothing was released (${res.status}). Try again in a minute.`,
+        : `Something went wrong, so nothing was shown (${res.status}). Please try again in a minute.`,
     };
   }
   refresh();
@@ -73,4 +73,29 @@ export async function signAnswer(askSeq: number, _prev: SignState, formData: For
   }
   refresh();
   return { result: res.data, error: null };
+}
+
+export type TeamState = { error: string | null; done: boolean };
+
+// Send a question the documents could not answer to a team. Recorded in the audit trail.
+export async function askTeam(askSeq: number, _prev: TeamState, formData: FormData): Promise<TeamState> {
+  const team = String(formData.get("team") ?? "");
+  const question = String(formData.get("question") ?? "").trim();
+  if (question.length < 3) return { error: "Write the question for the team.", done: false };
+  const { current } = await getCurrentPersona();
+  const res = await postJson<{ seq: number }>("/team-requests", { persona: current.id, ask_seq: askSeq, team, question });
+  if (!res.ok) return { error: typeof res.detail === "string" ? res.detail : `Not sent (${res.status}).`, done: false };
+  refresh();
+  return { error: null, done: true };
+}
+
+// A team member answers an open request. Recorded in the audit trail.
+export async function answerTeam(requestSeq: number, _prev: TeamState, formData: FormData): Promise<TeamState> {
+  const answer = String(formData.get("answer") ?? "").trim();
+  if (answer.length < 3) return { error: "Write an answer first.", done: false };
+  const { current } = await getCurrentPersona();
+  const res = await postJson<{ seq: number }>(`/team-requests/${requestSeq}/answer`, { persona: current.id, answer });
+  if (!res.ok) return { error: typeof res.detail === "string" ? res.detail : `Not sent (${res.status}).`, done: false };
+  refresh();
+  return { error: null, done: true };
 }

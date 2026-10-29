@@ -275,8 +275,8 @@ def answer_status(conn: psycopg.Connection, viewer_id: str, ask_seq: int) -> dic
             return None
     out = {"ask_seq": seq, "question": payload["question"]}
     if review is None:
-        return out | {"status": "held_for_review", "decision_label": "Held for review",
-                      "message": "Held for review. This answer must be reviewed and electronically signed "
+        return out | {"status": "held_for_review", "decision_label": "Waiting for QA sign-off",
+                      "message": "Waiting for QA sign-off. A QA Manager has to review and sign this answer "
                                  "by a QA Manager before it can be used."}
     receipt = {"audit_seq": review_seq, "audit_hash": review_hash, "content_hash": review["content_hash"]}
     if review["outcome"] == "rejected":
@@ -288,5 +288,5 @@ def answer_status(conn: psycopg.Connection, viewer_id: str, ask_seq: int) -> dic
         return out | {"status": "refused", "decision_label": "Refused",
                       "message": "Refused. The signed answer no longer matches its signature, so nothing was released.",
                       "receipt": receipt}
-    return out | {"status": "released", "decision_label": "Released after QA review", "message": content["text"],
+    return out | {"status": "released", "decision_label": "Approved by QA", "message": content["text"],
                   "citations": _public(content), "signature": manifestation(review), "receipt": receipt}

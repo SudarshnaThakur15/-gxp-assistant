@@ -86,11 +86,11 @@ export async function Chat({ me, chatId }: { me: Persona; chatId: string | null 
         <div className="flex flex-1 flex-col justify-center gap-3 py-6">
           <Eyebrow>Assistant</Eyebrow>
           <h1 className="max-w-2xl text-3xl font-extrabold leading-[1.08] sm:text-4xl">
-            Ask the approved documents.<br />Rules decide what you see.
+            Ask about your SOPs, specifications<br />and records.
           </h1>
           <p className="max-w-xl text-[15px] leading-relaxed text-muted">
-            Every answer quotes the exact document section it comes from. Fixed rules check each claim first, and
-            anything that needs a person waits for a QA signature. Ask follow-ups in the same chat. Try one of these:
+            Each answer quotes the section it comes from, and anything that needs a person waits for QA to sign it off.
+            You can ask follow-up questions in the same chat. Some examples:
           </p>
         </div>
       )}
@@ -119,7 +119,7 @@ function Turn({ run, viewerId, compact }: { run: RunDetail; viewerId: string; co
       <div className="flex flex-col items-end gap-1">
         <p className="max-w-[85%] whitespace-pre-line rounded-card rounded-br-md bg-ink px-4 py-3 text-[15px] text-white">{run.question}</p>
         {run.standalone_question && (
-          <p className="max-w-[85%] text-right text-xs text-faint">searched as: {run.standalone_question}</p>
+          <p className="max-w-[85%] text-right text-xs text-faint">understood as: {run.standalone_question}</p>
         )}
       </div>
       {compact ? <CompactAnswer run={run} viewerId={viewerId} /> : <AnswerCard run={run} viewerId={viewerId} />}

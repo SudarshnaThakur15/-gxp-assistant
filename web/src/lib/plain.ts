@@ -11,7 +11,7 @@ export const STATUS: Record<Outcome, { title: string; tone: Tone; icon: string }
   held: { title: "Waiting for QA sign-off", tone: "wait", icon: "◷" },
   approved: { title: "Approved and signed by QA", tone: "ok", icon: "✓" },
   rejected: { title: "Rejected by QA", tone: "fail", icon: "✕" },
-  refused: { title: "This assistant can't answer that", tone: "fail", icon: "⊘" },
+  refused: { title: "Not answered", tone: "fail", icon: "⊘" },
 };
 
 // Short label for pills and lists.
@@ -21,7 +21,7 @@ export const SHORT: Record<Outcome, string> = {
   held: "Waiting for QA",
   approved: "Approved by QA",
   rejected: "Rejected by QA",
-  refused: "Can't answer",
+  refused: "Not answered",
 };
 
 const REASONS: [RegExp, string][] = [
@@ -47,6 +47,8 @@ const REASONS: [RegExp, string][] = [
   [/^V9\b/, "Draft guidance was cited without its “not yet in force” label."],
   [/^V10\b/, "The draft named a product form or code its source never mentions."],
   [/^V11\b/, "The documents don't mention exactly what you asked about."],
+  [/^P1\b/, "Part of the investigation pack cited the wrong kind of record."],
+  [/^P2\b/, "The draft gave a cause for the open deviation. That is the investigator's decision."],
   [/^follow-up failed: AddedIdentifiers/, "The follow-up couldn't be understood safely, so nothing was searched. Ask it as a complete question."],
   [/failed: /, "The AI service did not respond in time, so nothing was released. Please try again."],
 ];
@@ -74,11 +76,11 @@ export const CHECK_PLAIN: Record<string, string> = {
 };
 
 export const GATE_PLAIN: Record<string, { title: string; what: string }> = {
-  Screen: { title: "Screened the question", what: "Fixed rules first, then an AI check that can only add a refusal." },
+  Screen: { title: "Screened the question", what: "Rules first, then an AI check that can add a refusal but never remove one." },
   Retrieve: { title: "Searched approved documents", what: "Only in-force documents you may see; others are filtered out first." },
   Generate: { title: "AI drafted an answer", what: "Claims, each with a word-for-word quote. Nothing shown unchecked." },
   Validate: { title: "Checked every claim", what: "11 fixed checks on quotes, numbers, versions and wording." },
   Tier: { title: "Decided who must look", what: "From the kind of question, never from the AI's confidence." },
   Record: { title: "Recorded in the audit trail", what: "Saved and sealed before anything was shown." },
-  Release: { title: "Released, held or refused", what: "Exactly as the rules decided." },
+  Release: { title: "Answered, held for QA or not answered", what: "Exactly as the checks decided." },
 };

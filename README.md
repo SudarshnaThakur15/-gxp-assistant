@@ -40,15 +40,20 @@ screen (segregation of duties), and the API enforces the same rules:
 
 | Role | Home | Can do | Sees |
 |---|---|---|---|
-| QA Analyst (Alex Morgan, Sam Rivera) | Ask: chat-style, past questions on the left | Ask questions | Only their own questions; a held answer once QA signs it |
-| QA Manager (Jordan Lee) | Review inbox | Ask, approve or reject held answers with an electronic signature | Questions from the programmes they cover, including held drafts |
-| Auditor (Taylor Brooks) | Overview | Nothing: read-only, cannot ask or sign | Every question, draft and audit entry, automated test runs labelled |
+| QA Analyst (Alex Morgan, Sam Rivera) | Ask: chats like ChatGPT, past chats on the left | Ask questions and follow-ups; send a "not found" question to a team | Only their own questions; a held answer once QA signs it |
+| QA Manager (Jordan Lee) | Review inbox | Ask, approve or reject held answers with an electronic signature; answer for Quality Assurance | Questions from the programmes they cover, including held drafts |
+| Team member (Priya Shah) | Team input | Answer questions sent to Quality Control, Production or Engineering | Only the requests addressed to their teams |
+| Auditor (Taylor Brooks) | Auditor console | Nothing: read-only, cannot ask or sign | Every question, draft and audit entry, automated test runs labelled |
 
-Every answer shows a plain status line and the answer first; the proof sits in tabs: Answer ·
-Sources · Checks · How it ran · Record. Other pages: `/runs` (questions with filters),
-`/runs/{n}/evidence` (printable evidence pack), `/documents` (citations link to the exact section),
-`/how-it-works`, and for auditors `/audit`, `/assurance` (rules + live lab), `/trust`, `/proof`,
-`/sources`, `/status`. The automated evaluation asks as dedicated test accounts
+Menus and headings follow the AiVACO assurance platform (Work · Evidence · Setup). Every answer
+shows a plain status line, its tier and the answer first; the proof sits in tabs: Answer ·
+Grounded in documents · Assurance checks · How it ran · History, and a Decision line says who
+must act next. Other pages: `/runs` (questions with filters), `/c/{id}` (a chat),
+`/runs/{n}/evidence` (printable evidence pack), `/team-input`, `/documents` (citations link to the
+exact section), `/how-it-works`, `/q9` (ICH Q9 alignment with live routing counts), `/controls`
+(regulations against company procedures and system controls, gaps listed), and for auditors
+`/audit`, `/assurance` (rules + live lab), `/trust`, `/proof`, `/sources` (connected systems),
+`/risk` (FMEA of the assistant itself), `/status`. The automated evaluation asks as dedicated test accounts
 (`test-analyst-a`, `test-analyst-b`), never as a real person.
 
 ## Knowledge base

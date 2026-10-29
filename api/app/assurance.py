@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from app.audit import canonical_json
 from app.retrieval import Hit, source_id
 
-RULESET_VERSION = "2026.10.29-1"
+RULESET_VERSION = "2026.10.29-2"
 
 # --- Gate 1: screening rules -------------------------------------------------
 # A rule fires when its `decision` pattern matches and (if given) its `target` pattern
@@ -170,10 +170,32 @@ TIERS = {"T1": "Knowledge answer: released by rules with citations",
          "T2": "Investigation or human-action content: held for QA review and electronic signature",
          "T3": "Prohibited decision: refused, citing the documents the rule rests on"}
 
+# --- Investigation packs: the AI prepares, the investigator decides ------------------
+# For an open deviation the assistant may not determine the root cause, classify it or choose a
+# CAPA (S2–S4), but it may gather what the records and procedures say. Causes and CAPAs in a pack
+# come only from earlier, closed records, each quoted; never from the AI about the open case.
+PACK_REQUEST = r"\binvestigation pack\b"
+PACK_SECTIONS = {
+    "subject": "what the open deviation itself records (never its cause)",
+    "similar_case": "an earlier, closed deviation about the same kind of event",
+    "earlier_cause": "the root cause documented in such an earlier, closed record",
+    "earlier_capa": "a CAPA documented for such an earlier event",
+    "procedure": "what an SOP, policy, specification or guideline requires",
+}
+EARLIER_DOC_TYPES = ("deviation", "capa")
+PROCEDURE_DOC_TYPES = ("sop", "policy", "specification", "guideline", "quality_agreement")
+CAUSE_WORDS = r"\b(?:caus(?:e|ed|es|ing)|due to|because|attribut\w*|result(?:ed|ing)? from|originat\w*)\b"
+PACK_CHECKS = {
+    "P1": ("Each part of the pack cites the right kind of record", "hard"),
+    "P2": ("Nothing in the pack states a cause for the open deviation", "hard"),
+}
+
 RULESET = {
     "version": RULESET_VERSION,
     "screen": SCREEN_RULES, "screen_ai_sources": AI_SCREEN_SOURCES, "unnamed_target": UNNAMED_TARGET,
     "followup": {"back_reference": BACK_REFERENCE, "code": CODE},
+    "pack": {"request": PACK_REQUEST, "sections": PACK_SECTIONS, "earlier_doc_types": EARLIER_DOC_TYPES,
+             "procedure_doc_types": PROCEDURE_DOC_TYPES, "cause_words": CAUSE_WORDS, "checks": PACK_CHECKS},
     "validation": {"checks": CHECKS, "quote_min_words": QUOTE_MIN_WORDS, "quote_min_chars": QUOTE_MIN_CHARS,
                    "evidence_keep": EVIDENCE_KEEP, "prohibited_language": PROHIBITED_LANGUAGE,
                    "injection_patterns": INJECTION_PATTERNS, "scope_concepts": SCOPE_CONCEPTS,
@@ -183,7 +205,7 @@ RULESET = {
 }
 RULESET_FINGERPRINT = hashlib.sha256(canonical_json(RULESET).encode()).hexdigest()
 
-DECISION_LABELS = {"released": "Released by rules", "held_for_review": "Held for review", "refused": "Refused"}
+DECISION_LABELS = {"released": "Answered", "held_for_review": "Waiting for QA sign-off", "refused": "Not answered"}
 
 
 @dataclass
@@ -363,6 +385,39 @@ def validate(question: str, draft: dict, hits: list[Hit], in_force: dict[int, bo
     asked = unsupported_terms(question, evidence)
     add("V11", [f"question names {', '.join(asked)}; the cited documents never mention it"] if asked else [])
     return checks, resolved, notices
+
+
+def pack_subject(question: str, named_records: list[dict]) -> str | None:
+    """The deviation an investigation pack is asked for: exactly one named deviation record."""
+    if not re.search(PACK_REQUEST, question, re.I):
+        return None
+    deviations = sorted({r["code"] for r in named_records if r.get("doc_type") == "deviation"})
+    return deviations[0] if len(deviations) == 1 else None
+
+
+def validate_pack(subject: str, resolved: list[dict]) -> list[Check]:
+    """The extra checks on an investigation pack (P1, P2)."""
+    wrong, causes = [], []
+    for r in resolved:
+        h, section = r["hit"], r.get("section")
+        if h is None:
+            continue  # V2 already refuses a citation that was not retrieved
+        about_subject = h.code == subject
+        if section == "subject":
+            ok = about_subject
+        elif section in ("similar_case", "earlier_cause", "earlier_capa"):
+            ok = not about_subject and h.doc_type in EARLIER_DOC_TYPES and h.record_state == "closed"
+        else:
+            ok = section == "procedure" and h.doc_type in PROCEDURE_DOC_TYPES
+        if not ok:
+            kind = " ".join(x for x in (h.record_state, h.doc_type) if x)
+            wrong.append(f"claim {r['n']} ({section}) cites {h.code}, a {kind} record")
+        # a cause for the open deviation may only be reported if its own record states it
+        if (about_subject or section == "subject") and re.search(CAUSE_WORDS, plain(r["text"]), re.I) \
+                and not re.search(CAUSE_WORDS, plain(r["quote"]), re.I):
+            causes.append(f"claim {r['n']} gives a cause for {subject} that its record does not state")
+    return [Check(cid, *PACK_CHECKS[cid], "fail" if failures else "pass", "; ".join(failures))
+            for cid, failures in (("P1", wrong), ("P2", causes))]
 
 
 # --- Gate 5 ----------------------------------------------------------------------

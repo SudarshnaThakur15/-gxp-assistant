@@ -9,16 +9,15 @@ import { LinkPending } from "@/components/pending";
 type Group = { heading: string; links: { href: string; label: string; badge?: number }[] };
 
 // Each role sees only what it needs: segregation of duties shows in the menu too.
-function groupsFor(role: Persona["role"], waiting: number): Group[] {
-  const learn = { heading: "Learn", links: [{ href: "/how-it-works", label: "How it works" }] };
+// Headings and names follow the AiVACO assurance platform: Work, Evidence, Setup.
+function groupsFor(role: Persona["role"], waiting: number, teamWaiting: number): Group[] {
+  const howItWorks = { href: "/how-it-works", label: "How a question is handled" };
+  const library = { href: "/documents", label: "Document library" };
+  const teamInput = { href: "/team-input", label: "Team input", badge: teamWaiting };
   if (role === "qa_analyst") {
     return [
-      { heading: "Work", links: [
-        { href: "/", label: "Ask" },
-        { href: "/runs", label: "My questions" },
-        { href: "/documents", label: "Documents" },
-      ] },
-      learn,
+      { heading: "Work", links: [{ href: "/", label: "Ask" }, { href: "/runs", label: "My questions" }, teamInput] },
+      { heading: "Evidence", links: [howItWorks, library, { href: "/q9", label: "ICH Q9 alignment" }] },
     ];
   }
   if (role === "qa_manager") {
@@ -27,37 +26,53 @@ function groupsFor(role: Persona["role"], waiting: number): Group[] {
         { href: "/reviews", label: "Review inbox", badge: waiting },
         { href: "/", label: "Ask" },
         { href: "/runs", label: "Team questions" },
-        { href: "/documents", label: "Documents" },
+        teamInput,
       ] },
-      learn,
+      { heading: "Evidence", links: [
+        howItWorks, library,
+        { href: "/controls", label: "Controls and validation" },
+        { href: "/q9", label: "ICH Q9 alignment" },
+        { href: "/assurance", label: "Rules and checks" },
+      ] },
+    ];
+  }
+  if (role === "team_member") {
+    return [
+      { heading: "Work", links: [teamInput] },
+      { heading: "Evidence", links: [howItWorks, library] },
     ];
   }
   return [
-    { heading: "Oversight", links: [
-      { href: "/", label: "Overview" },
+    { heading: "Work", links: [
+      { href: "/", label: "Auditor console" },
       { href: "/runs", label: "All questions" },
-      { href: "/audit", label: "Audit trail" },
+      teamInput,
     ] },
     { heading: "Evidence", links: [
-      { href: "/how-it-works", label: "How it works" },
-      { href: "/assurance", label: "Assurance layer" },
-      { href: "/trust", label: "Trust centre" },
+      howItWorks, library,
+      { href: "/controls", label: "Controls and validation" },
       { href: "/proof", label: "Proof and value" },
-      { href: "/documents", label: "Document library" },
+      { href: "/q9", label: "ICH Q9 alignment" },
+      { href: "/assurance", label: "Rules and checks" },
+      { href: "/trust", label: "Trust centre" },
+      { href: "/audit", label: "Audit trail" },
     ] },
     { heading: "Setup", links: [
-      { href: "/sources", label: "Document sources" },
+      { href: "/sources", label: "Connected systems" },
+      { href: "/risk", label: "Platform risk (FMEA)" },
       { href: "/status", label: "System status" },
     ] },
   ];
 }
 
-export function NavLinks({ role, waiting = 0 }: { role: Persona["role"]; waiting?: number }) {
+export function NavLinks({ role, waiting = 0, teamWaiting = 0 }: {
+  role: Persona["role"]; waiting?: number; teamWaiting?: number;
+}) {
   const pathname = usePathname();
   const active = (href: string) => (href === "/" ? pathname === "/" || pathname.startsWith("/c/") : pathname.startsWith(href));
   return (
     <nav className="flex flex-col gap-6">
-      {groupsFor(role, waiting).map((group) => (
+      {groupsFor(role, waiting, teamWaiting).map((group) => (
         <div key={group.heading} className="flex flex-col gap-0.5">
           <p className="px-3 pb-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-white/45">{group.heading}</p>
           {group.links.map((link) => (

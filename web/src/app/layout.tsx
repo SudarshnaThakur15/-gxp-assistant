@@ -11,7 +11,7 @@ const plexMono = IBM_Plex_Mono({ variable: "--font-plex-mono", subsets: ["latin"
 
 export const metadata: Metadata = {
   title: "GxP Knowledge Assistant",
-  description: "Questions answered from approved GxP documents: the AI proposes, fixed rules decide, people sign",
+  description: "Answers to GxP questions from approved documents, checked before anyone sees them",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -25,9 +25,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <div className="flex min-w-0 flex-1 flex-col">
             <main className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
               <p className="rounded-card border border-brand/60 bg-sunken/60 px-4 py-3 text-sm text-body print:hidden">
-                <span className="font-semibold text-strong">You are looking at a demo.</span> The documents, organisation
-                and people are fictional; the AI model is real. Answers are released, held or refused by fixed rules,
-                never by the AI. Not a validated system.
+                <span className="font-semibold text-strong">This is a demo.</span> The company, people and documents are
+                made up; the AI model is real. It is not a validated system.
               </p>
               {children}
             </main>

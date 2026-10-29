@@ -22,6 +22,11 @@ SCREEN_NOTES = {
     "S4": "Asking which CAPA to choose or for a CAPA recommendation.",
     "S5": "Text that tries to override the assistant's instructions (prompt injection).",
 }
+PACK_NOTES = {
+    "P1": "Facts about the open deviation cite its own record; earlier causes and CAPAs cite closed records; "
+          "requirements cite procedures.",
+    "P2": "The pack may report a cause only where the open deviation's own record states it. The investigator decides.",
+}
 CHECK_NOTES = {
     "V1": "A draft that says it answered must contain claims that can be checked.",
     "V2": "The AI may cite only passages it was given for this question; a made-up citation is refused.",
@@ -36,13 +41,13 @@ CHECK_NOTES = {
     "V11": "If the question names something no cited document mentions, a person checks the answer fits.",
 }
 TIER_RULES = [
-    {"id": "T3", "rule": "A screening rule (S0–S5) or the AI screen refused the request", "outcome": "Refused, citing POL-QA-001 §4"},
+    {"id": "T3", "rule": "A screening rule (S0–S5) or the AI screen refused the request", "outcome": "Not answered; the rule's source documents are shown"},
     {"id": "R-INV-Q", "rule": "The question asks for an investigation (history, previous events, a DEV or CAPA number)", "outcome": "T2: held for review"},
     {"id": "R-INV-AI", "rule": "The AI screen classified it as investigation support (the AI can raise the tier, never lower it)", "outcome": "T2: held for review"},
     {"id": "R-INV-DOC", "rule": "The answer cites a deviation or CAPA record", "outcome": "T2: held for review"},
     {"id": "R-HUMAN", "rule": "A cited procedure section requires a person to act: approve, sign, notify, quarantine, report to QA", "outcome": "T2: held for review"},
     {"id": "Review checks", "rule": "V6 or V11 failed", "outcome": "T2: held for review"},
-    {"id": "T1", "rule": "None of the above, and every blocking check passed", "outcome": "Released by rules, with citations"},
+    {"id": "T1", "rule": "None of the above, and every blocking check passed", "outcome": "Answered straight away, with sources"},
 ]
 
 
@@ -229,4 +234,6 @@ def catalogue() -> dict:
         "checks": [{"id": cid, "title": title, "severity": severity, "note": CHECK_NOTES[cid]}
                    for cid, (title, severity) in assurance.CHECKS.items()],
         "tier_rules": TIER_RULES,
+        "pack_checks": [{"id": cid, "title": title, "severity": severity, "note": PACK_NOTES[cid]}
+                        for cid, (title, severity) in assurance.PACK_CHECKS.items()],
     }

@@ -6,7 +6,7 @@ import { switchPersona } from "@/app/actions";
 import { Overlay, Spinner, TopBar } from "@/components/pending";
 import type { Persona } from "@/lib/api";
 
-const ROLE = { qa_analyst: "QA Analyst", qa_manager: "QA Manager", auditor: "Auditor" } as const;
+const ROLE = { qa_analyst: "QA Analyst", qa_manager: "QA Manager", auditor: "Auditor", team_member: "Team member" } as const;
 
 // Switching persona reloads every view for the new role, so show it happening instead of freezing.
 export function PersonaSwitcher({ personas, currentId }: { personas: Persona[]; currentId: string }) {

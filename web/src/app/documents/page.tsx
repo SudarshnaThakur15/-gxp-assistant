@@ -8,7 +8,7 @@ import { getCurrentPersona } from "@/lib/persona";
 export default function DocumentsPage() {
   return (
     <>
-      <PageHeader eyebrow="Document library" title="Only approved, in-force versions can ground an answer.">
+      <PageHeader eyebrow="Document library" title="Controlled documents and their versions.">
         The controlled documents you may see, with every version. Superseded versions stay here for the record but
         are never quoted. Another client&apos;s documents are not listed at all.
       </PageHeader>

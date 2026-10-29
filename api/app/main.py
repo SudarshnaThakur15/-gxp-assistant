@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from app.alignment import controls, platform_risk, q9
 from app.assurance_info import catalogue, gate_stats, run_lab
 from app.audit import verify_chain
 from app.config import settings
@@ -20,6 +21,7 @@ from app.pipeline import ChatNotFound, ask, public_view
 from app.retrieval import retrieve
 from app.review import SignatureRefused, answer_status, decide, queue
 from app.runs import audit_entries, chat_detail, list_runs, run_detail
+from app.team import TEAMS, TeamInputRefused, answer_request, ask_team, requests, waiting_count
 
 
 @asynccontextmanager
@@ -94,7 +96,7 @@ def personas() -> list[dict]:
     with read_pool.connection() as conn:
         rows = conn.execute(
             """
-            SELECT u.id, u.name, u.title, u.role, u.can_sign, t.name,
+            SELECT u.id, u.name, u.title, u.role, u.can_sign, u.teams, t.name,
                    coalesce(array_agg(c.name ORDER BY c.name) FILTER (WHERE c.id IS NOT NULL), '{}')
               FROM users u
               JOIN tenants t ON t.id = u.tenant_id
@@ -106,8 +108,8 @@ def personas() -> list[dict]:
         ).fetchall()
     result = [
         {"id": id_, "name": name, "title": title, "role": role, "can_sign": can_sign,
-         "organisation": org, "clients": clients}
-        for id_, name, title, role, can_sign, org, clients in rows
+         "teams": [{"id": x, "name": TEAMS[x]} for x in teams], "organisation": org, "clients": clients}
+        for id_, name, title, role, can_sign, teams, org, clients in rows
     ]
     _personas = (time.monotonic(), result)
     return result
@@ -250,6 +252,8 @@ def ask_endpoint(req: AskRequest) -> dict:
             row = conn.execute("SELECT role FROM users WHERE id = %s", (req.persona,)).fetchone()
             if row is not None and row[0] == "auditor":  # segregation of duties: auditors are read-only
                 raise HTTPException(status_code=403, detail="Auditors are read-only and cannot ask questions.")
+            if row is not None and row[0] == "team_member":  # team members answer what they are asked
+                raise HTTPException(status_code=403, detail="Team members answer team requests; they do not ask.")
             return public_view(ask(conn, req.persona, req.question, chat_id=req.chat_id))
     except HTTPException:
         raise
@@ -319,6 +323,83 @@ def sign_endpoint(ask_seq: int, req: SignRequest) -> dict:
             raise HTTPException(status_code=e.status, detail={"code": e.code, "message": str(e)}) from e
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
+        conn.commit()
+    return result
+
+
+@app.get("/q9")
+def q9_endpoint() -> dict:
+    """ICH Q9(R1) alignment: principles with verified quotes, the tiers, and live routing counts."""
+    with read_pool.connection() as conn:
+        return q9(conn)
+
+
+@app.get("/controls")
+def controls_endpoint() -> dict:
+    """Regulations against the company procedures and system controls that meet them, gaps included."""
+    with read_pool.connection() as conn:
+        return controls(conn)
+
+
+@app.get("/platform-risk")
+def platform_risk_endpoint() -> dict:
+    """The assistant's own risk assessment (FMEA), with live counts of what each rule has caught."""
+    with read_pool.connection() as conn:
+        return platform_risk(conn)
+
+
+@app.get("/team-requests")
+def team_requests(persona: str) -> list[dict]:
+    """Questions sent to a team, as this persona may see them: their own, their teams', or all (auditors)."""
+    with read_pool.connection() as conn:
+        try:
+            return requests(conn, persona)
+        except TeamInputRefused as e:
+            raise HTTPException(status_code=e.status, detail=str(e)) from e
+
+
+@app.get("/team-requests/count")
+def team_request_count(persona: str) -> dict:
+    """Open requests this persona can answer (the menu badge)."""
+    with read_pool.connection() as conn:
+        try:
+            return {"waiting": waiting_count(conn, persona)}
+        except TeamInputRefused:
+            return {"waiting": 0}
+
+
+class TeamRequest(BaseModel):
+    persona: str = Field(max_length=64)
+    ask_seq: int
+    team: str = Field(max_length=40)
+    question: str = Field(min_length=3, max_length=1000)
+
+
+@app.post("/team-requests")
+def team_request_create(req: TeamRequest) -> dict:
+    """Send a question the documents could not answer to a team. Recorded in the audit trail."""
+    with pool.connection() as conn:
+        try:
+            result = ask_team(conn, req.persona, req.ask_seq, req.team, req.question)
+        except TeamInputRefused as e:
+            raise HTTPException(status_code=e.status, detail=str(e)) from e
+        conn.commit()
+    return result
+
+
+class TeamAnswer(BaseModel):
+    persona: str = Field(max_length=64)
+    answer: str = Field(min_length=3, max_length=1000)
+
+
+@app.post("/team-requests/{request_seq}/answer")
+def team_request_answer(request_seq: int, req: TeamAnswer) -> dict:
+    """A team member answers an open request. Recorded in the audit trail."""
+    with pool.connection() as conn:
+        try:
+            result = answer_request(conn, req.persona, request_seq, req.answer)
+        except TeamInputRefused as e:
+            raise HTTPException(status_code=e.status, detail=str(e)) from e
         conn.commit()
     return result
 

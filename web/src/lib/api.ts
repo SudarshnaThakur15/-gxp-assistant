@@ -46,8 +46,9 @@ export type Persona = {
   id: string;
   name: string;
   title: string;
-  role: "qa_analyst" | "qa_manager" | "auditor";
+  role: "qa_analyst" | "qa_manager" | "auditor" | "team_member";
   can_sign: boolean;
+  teams: { id: string; name: string }[]; // the teams they answer questions for
   organisation: string;
   clients: string[];
 };
@@ -155,6 +156,8 @@ export type RunDetail = {
   test: boolean;
   chat: { id: string; turn: number };
   standalone_question: string | null; // a follow-up, as it was actually searched and answered
+  pack: { subject: string } | null; // an investigation pack for this open deviation
+  pack_offer: string | null; // a refused root-cause or CAPA question: the deviation a pack could cover
   requested_by: { id: string; name: string };
   outcome: Outcome;
   label: string;
@@ -163,7 +166,7 @@ export type RunDetail = {
   tier: string;
   reasons: string[];
   error: string | null;
-  answer: { text: string; withheld: boolean; citations?: Citation[]; notices?: string[] } | null;
+  answer: { text: string; withheld: boolean; citations?: Citation[]; notices?: string[]; sections?: PackSection[] } | null;
   rule_sources: Citation[]; // a refusal: the approved documents its rule rests on
   checks: Check[];
   trace: Gate[];
@@ -173,6 +176,84 @@ export type RunDetail = {
   review: Review | null;
   can_review: boolean;
   history: HistoryEvent[];
+  team_input: TeamInput | null; // a question the documents could not answer, sent to a team
+};
+
+export type PackSection = {
+  section: "subject" | "similar_case" | "earlier_cause" | "earlier_capa" | "procedure";
+  items: { text: string; n: number }[];
+};
+
+export type TeamInput = {
+  request_seq: number;
+  team: { id: string; name: string };
+  question: string;
+  asked_at: string;
+  status: "waiting" | "answered";
+  answer: { text: string; by: string; by_name?: string; recorded_at: string } | null;
+};
+
+export type TeamRequest = {
+  seq: number;
+  recorded_at: string;
+  ask_seq: number;
+  chat_id: string;
+  team: { id: string; name: string };
+  question: string;
+  asked_by: { id: string; name: string };
+  test: boolean;
+  status: "waiting" | "answered";
+  answer: { seq: number; recorded_at: string; text: string; by: { id: string; name: string } } | null;
+  can_answer: boolean;
+};
+
+// A clause or section of a controlled document, resolved against the library when the page loaded.
+export type DocRef = {
+  doc: string;
+  section: string;
+  label: string;
+  resolved: boolean;
+  version?: string;
+  title?: string;
+  quote?: string | null;
+  external?: string;
+};
+
+export type Q9Info = {
+  principles: { ref: DocRef; how: string }[];
+  tiers: { tier: string; risk: string; what: string; formality: string; who: string; route: string }[];
+  tier_rules: { id: string; rule: string; outcome: string }[];
+  grid: Record<string, Record<Outcome, number>>;
+  outcomes: Outcome[];
+  off_route: number;
+};
+
+export type ControlStatus = "covered" | "partial" | "gap" | "by_design";
+export type ControlRow = {
+  issuer: "EU" | "ICH" | "FDA";
+  reg: DocRef;
+  requirement: string;
+  status: ControlStatus;
+  company: DocRef[];
+  system: string[];
+  evidence: [string, string] | null;
+  note: string | null;
+};
+export type ControlsInfo = { rows: ControlRow[]; counts: Record<ControlStatus, number> };
+
+export type PlatformRisk = {
+  id: string;
+  risks: {
+    id: string;
+    component: string;
+    failure: string;
+    effect: string;
+    severity: number;
+    before: { o: number; d: number; rpn: number };
+    after: { o: number; d: number; rpn: number };
+    measures: { rule: string | null; title: string; caught: number | null }[];
+    note: string | null;
+  }[];
 };
 
 // A conversation: each message is its own run, with its own checks, decision and record.
@@ -248,6 +329,11 @@ export const verifyAudit = () => getJson<AuditVerification>("/audit/verify");
 export const getRuns = (persona: string, filter?: string) =>
   getJson<RunList>(`/runs?persona=${q(persona)}${filter ? `&filter=${q(filter)}` : ""}`);
 export const getRun = (persona: string, seq: number) => getJson<RunDetail>(`/runs/${seq}?persona=${q(persona)}`);
+export const getTeamRequests = (persona: string) => getJson<TeamRequest[]>(`/team-requests?persona=${q(persona)}`);
+export const getTeamCount = (persona: string) => getJson<{ waiting: number }>(`/team-requests/count?persona=${q(persona)}`);
+export const getQ9 = () => getJson<Q9Info>("/q9");
+export const getControls = () => getJson<ControlsInfo>("/controls");
+export const getPlatformRisk = () => getJson<PlatformRisk>("/platform-risk");
 export const getChat = (persona: string, id: string) => getJson<Chat>(`/chats/${q(id)}?persona=${q(persona)}`);
 export const getReviewCount = (persona: string) => getJson<{ waiting: number }>(`/reviews/count?persona=${q(persona)}`);
 export const getQueue = (persona: string) => getJson<QueueItem[]>(`/reviews?persona=${q(persona)}`);
@@ -285,6 +371,7 @@ export type AssuranceInfo = {
   screen_rules: { id: string; title: string; note: string; sources?: string[] }[];
   checks: { id: string; title: string; severity: "hard" | "review"; note: string }[];
   tier_rules: { id: string; rule: string; outcome: string }[];
+  pack_checks: { id: string; title: string; severity: "hard" | "review"; note: string }[];
   stats: {
     counts: Record<string, number>;
     failed_checks: Record<string, number>;

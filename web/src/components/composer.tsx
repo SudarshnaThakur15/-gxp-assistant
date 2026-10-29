@@ -78,7 +78,7 @@ export function Composer({ chatId, showSuggestions, onAsk }: {
                 send();
               }
             }}
-            placeholder={busy ? "Checking your question…" : chatId ? "Ask a follow-up…" : "Ask about an SOP, a specification, a deviation or a regulation…"}
+            placeholder={busy ? "Working on it…" : chatId ? "Ask a follow-up…" : "Ask about an SOP, a specification, a deviation or a regulation…"}
             className="max-h-40 min-h-11 flex-1 resize-none bg-transparent px-3 py-2.5 text-[15px] text-strong placeholder:text-faint focus:outline-none"
           />
           <button
@@ -87,7 +87,7 @@ export function Composer({ chatId, showSuggestions, onAsk }: {
             className="mb-0.5 flex items-center gap-2 rounded-lg bg-brand-action px-4 py-2.5 text-sm font-semibold text-white shadow-brand transition-[opacity,transform] active:scale-[0.97] disabled:opacity-40 disabled:shadow-none"
           >
             {busy && <Spinner className="h-3.5 w-3.5" />}
-            {busy ? "Checking" : "Ask"}
+            {busy ? "Working" : "Ask"}
           </button>
         </div>
         <p className="px-3 pb-1 pt-1 text-[11px] text-faint">

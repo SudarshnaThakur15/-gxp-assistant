@@ -17,7 +17,7 @@ type Inputs = {
 const FIELDS: { key: keyof Inputs; label: string; unit: string; max: number }[] = [
   { key: "questions", label: "Questions per month", unit: "", max: 20000 },
   { key: "manualMinutes", label: "Minutes to find and confirm an answer today", unit: "min", max: 240 },
-  { key: "releasedShare", label: "Share released by rules", unit: "%", max: 100 },
+  { key: "releasedShare", label: "Share answered without QA review", unit: "%", max: 100 },
   { key: "heldShare", label: "Share held for QA review", unit: "%", max: 100 },
   { key: "readMinutes", label: "Minutes to read an answer and its quotes", unit: "min", max: 60 },
   { key: "reviewMinutes", label: "Minutes for a QA review and signature", unit: "min", max: 120 },

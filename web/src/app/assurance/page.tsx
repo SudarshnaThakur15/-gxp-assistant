@@ -7,15 +7,15 @@ import { getAssurance, getLab, settle, type LabCase } from "@/lib/api";
 export default function AssurancePage() {
   return (
     <>
-      <PageHeader eyebrow="Assurance layer" title="The AI proposes. Fixed, tested rules decide.">
-        Everything on this page is plain code with no AI inside: the same input always gives the same result, so it can
-        be tested and validated like any other software. The counts are live from the audit trail, and the lab below
+      <PageHeader eyebrow="Rules and checks" title="The checks every answer has to pass.">
+        Everything on this page is ordinary code, not AI. The same input always gives the same result, so it can be
+        tested and validated like any other software. The counts are live from the audit trail, and the lab below
         runs deliberately bad drafts through the real rules every time this page loads.
       </PageHeader>
       <ol className="grid gap-3 md:grid-cols-4">
         {[
           ["1", "The AI drafts", "Claims, each citing one source with a word-for-word quote. No free text."],
-          ["2", "Fixed rules check it", "11 checks on every claim, its quote, its source and its wording."],
+          ["2", "The checks run", "11 checks on every claim, its quote, its source and its wording."],
           ["3", "A failure stops it", "A blocking failure refuses the answer; a review failure holds it for QA."],
           ["4", "The result is recorded", "In the hash-chained audit trail, before anything is shown."],
         ].map(([n, title, text]) => (
@@ -48,7 +48,7 @@ function SeverityTag({ severity }: { severity: "hard" | "review" }) {
 async function Rules() {
   const res = await settle(getAssurance());
   if (!res.data) return <ErrorNote>API unreachable: {res.error}</ErrorNote>;
-  const { ruleset, screen_rules, checks, tier_rules, stats } = res.data;
+  const { ruleset, screen_rules, checks, tier_rules, pack_checks, stats } = res.data;
   const c = stats.counts;
   const tiles: [number | string, string][] = [
     [c.runs ?? 0, "questions recorded"],
@@ -86,7 +86,7 @@ async function Rules() {
         rules in force at the time.
       </p>
 
-      <Card title="Gate 4: the 11 checks on every AI draft">
+      <Card title="The 11 checks on every draft">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-faint">
@@ -108,7 +108,7 @@ async function Rules() {
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Gate 1: screening rules (before any AI call)">
+        <Card title="Requests the assistant turns down (before any AI is used)">
           <ul className="divide-y divide-line-soft">
             {screen_rules.map((r) => (
               <li key={r.id} className="py-2 text-sm">
@@ -121,7 +121,7 @@ async function Rules() {
             ))}
           </ul>
         </Card>
-        <Card title="Gate 5: tier rules (never the AI's confidence)">
+        <Card title="When QA has to check an answer">
           <ul className="divide-y divide-line-soft">
             {tier_rules.map((r) => (
               <li key={r.id} className="py-2 text-sm">
@@ -132,12 +132,26 @@ async function Rules() {
           </ul>
         </Card>
       </div>
+      <Card title="Extra checks on investigation packs">
+        <p className="mb-2 text-sm text-muted">
+          For an open deviation the assistant may prepare a pack for the investigator, but never decide the root cause,
+          the classification or the CAPA. These checks run on every pack, on top of the 11 above.
+        </p>
+        <ul className="divide-y divide-line-soft">
+          {pack_checks.map((c) => (
+            <li key={c.id} className="flex flex-col gap-0.5 py-2 text-sm">
+              <p><Mono className="font-semibold">{c.id}</Mono> <span className="text-strong">{c.title}</span> <SeverityTag severity={c.severity} /></p>
+              <p className="text-xs text-faint">{c.note}</p>
+            </li>
+          ))}
+        </ul>
+      </Card>
     </>
   );
 }
 
 const OUTCOME_TEXT: Record<string, string> = {
-  refused: "Refused", held_for_review: "Held for review", released: "Released by rules", "not refused": "Allowed through",
+  refused: "Not answered", held_for_review: "Waiting for QA", released: "Answered", "not refused": "Allowed",
 };
 
 async function LabSection() {
@@ -148,7 +162,7 @@ async function LabSection() {
 
   return (
     <Card
-      title="Assurance lab: bad drafts, run live through the rules"
+      title="Test bench: deliberately wrong drafts, checked live"
       aside={
         <form action={refreshPage}>
           <button className="rounded-lg bg-ink px-3 py-1.5 text-sm font-medium text-white">Run every case again</button>
