@@ -32,6 +32,8 @@ from app.runs import LEGACY_CHAT
 
 NOT_FOUND = "Not found in the approved documentation available to you."
 INJECTION_NOTICE = "A retrieved record contains text addressed to AI systems. It was treated as data and ignored."
+CRITERION_NOTICE = ("The assistant shows the acceptance criterion only. Whether a result meets it is decided by QC, "
+                    "not by the assistant.")
 
 PERSONA_SQL = """
 SELECT u.id, d.code, d.doc_type, d.record_state
@@ -197,6 +199,7 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
         except Exception as e:  # invariant 5: no fallback model; a failed AI step is a refusal
             answer_type, error, error_detail = "error", f"screening failed: {type(e).__name__}", str(e)[:400]
     ms["screen"] = _ms(t)
+    screen["criterion_only"] = not screen["refused"] and assurance.criterion_only(asked)
     if screen["refused"]:  # a rule's refusal outranks a failed follow-up rewrite
         answer_type = "refusal"
     elif answer_type is None and screen["ai_intent"] == "off_topic":
@@ -239,6 +242,13 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
         checks, resolved, notices = assurance.validate(asked, draft, hits, in_force, injected)
         if subject and resolved:
             checks += assurance.validate_pack(subject, resolved)
+        # parts of the question no source answers: kept only if copied from the question itself
+        not_covered = [x for x in draft.get("not_covered") or []
+                       if assurance.evidence_form(x) and assurance.evidence_form(x) in assurance.evidence_form(asked)]
+        if not_covered and draft["status"] == "answered":
+            notices.append("Not covered by the approved documents: " + "; ".join(not_covered))
+        if screen.get("criterion_only"):
+            notices.append(CRITERION_NOTICE)
         if injected:
             notices.append(INJECTION_NOTICE)
         ms["validate"] = _ms(t)
@@ -262,8 +272,10 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
                        "Batch release and disposition, deviation classification, root cause and CAPA selection "
                        "belong to the investigator, QA and the Qualified Person. "
                        "I can find the relevant records and procedures instead.")
-            sources = [s for x in screen["rules"] for s in assurance.SCREEN_RULES[x["rule"]]["sources"]]
-            citations = _rule_sources(conn, persona, sources or assurance.AI_SCREEN_SOURCES)
+            sources = [s for x in screen["rules"] for s in assurance.SCREEN_RULES.get(x["rule"], {}).get("sources", [])]
+            if not sources and not screen["rules"]:  # refused by the AI screen
+                sources = assurance.AI_SCREEN_SOURCES
+            citations = _rule_sources(conn, persona, sources)
         elif answer_type == "error":
             message, citations = "Refused. The assistant could not complete this request safely, so nothing was released.", []
         else:

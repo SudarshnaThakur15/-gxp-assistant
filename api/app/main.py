@@ -399,6 +399,8 @@ def team_request_answer(request_seq: int, req: TeamAnswer) -> dict:
         try:
             result = answer_request(conn, req.persona, request_seq, req.answer)
         except TeamInputRefused as e:
+            if e.recorded:
+                conn.commit()
             raise HTTPException(status_code=e.status, detail=str(e)) from e
         conn.commit()
     return result

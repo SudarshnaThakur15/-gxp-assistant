@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from app.audit import canonical_json
 from app.retrieval import Hit, source_id
 
-RULESET_VERSION = "2026.10.29-2"
+RULESET_VERSION = "2026.10.29-3"
 
 # --- Gate 1: screening rules -------------------------------------------------
 # A rule fires when its `decision` pattern matches and (if given) its `target` pattern
@@ -76,8 +76,11 @@ SCREEN_RULES = {
         "title": "Classifying a deviation",
         "sources": [QA_DECIDES, _policy("classify a deviation")],
         "decision": (r"\b(?:classif(?:y|ied|ication)|categori[sz](?:e|ed|ation))\b"
-                     r"|\b(?:critical|major|minor)\s+or\s+(?:critical|major|minor)\b"),
-        "target": UNNAMED_TARGET + r"|\bDEV-\d{4}-\d{3}\b",
+                     r"|\b(?:critical|major|minor)\s+or\s+(?:critical|major|minor)\b"
+                     r"|\bcriteria\s+for\s+(?:a\s+)?(?:critical|major|minor)\b"
+                     r"|\b(?:what|which)\s+(?:category|class|classification)\b"),
+        "target": UNNAMED_TARGET + r"|\bDEV-\d{4}-\d{3}\b"  # a named record, or an event described by its values
+                  + r"|\b\d+(?:\.\d+)?\s*-?\s*(?:hours?|h|minutes?|min|days?|°\s?C)(?![A-Za-z])",
         "open_records_only": True,
     },
     "S3": {
@@ -107,6 +110,35 @@ SCREEN_RULES = {
 BACK_REFERENCE = r"\b(?:it|its|this|that|these|those|they|them|same|above|previous|earlier)\b"
 CODE = r"\b[A-Z]{2,5}(?:-[A-Z0-9]+)+\b"  # whole codes: ALD-26-117, SOP-QA-060, DEV-2026-027, ALD-101
 
+# --- Gate 1, before any rule: read the question the way a person would --------------
+# Invisible characters, look-alike letters from other alphabets and other languages would let a
+# prohibited request slip past the rules and leave only the AI screen. Rules read the cleaned text;
+# the record keeps what was typed.
+CONFUSABLES = str.maketrans({
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s",
+    "ԁ": "d", "ӏ": "l", "һ": "h", "ԛ": "q", "ԝ": "w", "ѵ": "v", "А": "A", "В": "B", "Е": "E", "К": "K",
+    "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T", "Х": "X", "У": "Y", "І": "I", "Ј": "J",
+    "Ѕ": "S", "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N",
+    "Ο": "O", "Ρ": "P", "Τ": "T", "Χ": "X", "Υ": "Y", "ο": "o", "α": "a", "ν": "v", "ι": "i", "κ": "k",
+    "ρ": "p", "τ": "t", "υ": "u", "χ": "x",
+})
+FOREIGN_WORDS = {  # common words of the languages a user might switch to; any two, outnumbering English, = refused
+    "der", "die", "das", "und", "nicht", "kann", "können", "werden", "wird", "mit", "für", "auf", "eine", "charge",
+    "freigegeben", "ist", "sind", "wie", "welche", "les", "est", "une", "pour", "avec", "peut", "être", "quelle",
+    "los", "las", "una", "para", "puede", "ser", "qué", "cuál", "het", "een", "niet", "worden", "gli", "può",
+    "essere", "quale",
+}
+ENGLISH_WORDS = {"the", "a", "an", "is", "are", "can", "be", "of", "for", "to", "what", "which", "how", "does",
+                 "do", "with", "in", "on", "and", "must", "should", "when", "who", "have", "has", "was", "were"}
+INPUT_RULES = {"S7": {"title": "Text the rules cannot read reliably: mixed alphabets or not English"}}
+
+# --- Gate 1: "does this result pass?" is QC's decision -------------------------------
+# The assistant may state the acceptance criterion, never compare a result with it.
+CRITERION_QUESTION = (r"\b(?:pass(?:es|ed)?|fail(?:s|ed)?|meets?|compl(?:y|ies)|conforms?|acceptable"
+                      r"|within\s+(?:the\s+)?spec\w*|out\s+of\s+spec\w*|oos)\b")
+MEASURED_VALUE = (r"\bresults?\b|\bmeasured\b|\b\d+(?:\.\d+)?\s*(?:%|°\s?C|EU/m[gL]|mg/mL|CFU|mg|mL|µm|h|hours?"
+                  r"|days?|months?)(?![A-Za-z])")
+
 # --- Gate 4: validation rules ------------------------------------------------
 QUOTE_MIN_WORDS, QUOTE_MIN_CHARS = 3, 12   # a quote must be long enough to be real evidence
 EVIDENCE_KEEP = "≤≥<>%./-+°µ="               # symbols that carry meaning in GMP values
@@ -118,6 +150,41 @@ PROHIBITED_LANGUAGE = (  # decision language the AI's own words may never contai
     r"|\b(?:likely|probable|possible|suspected)\s+root\s+cause\b"
     r"|\bshould\s+be\s+classified\b|\bclassify\s+(?:it|this)\s+as\b"
 )
+# A conformance verdict in the AI's own words ("meets the specification", "the batch conforms") is the
+# OOS decision, which belongs to QC. Allowed only where the cited passage itself says it.
+CONFORMANCE = (
+    r"\b(?:meets?|met|pass(?:es|ed)?|compl(?:y|ies|ied)\s+with|conforms?(?:\s+to)?|conformed|(?:is|are|falls?)\s+within"
+    r"|(?:is|are)\s+outside|out\s+of)\s+(?:the\s+|its\s+|all\s+)?(?:release\s+|acceptance\s+)?"
+    r"(?:spec(?:ification)?s?|limits?|criteri(?:a|on)|requirements?|range)\b"
+    r"|\b(?:batch|lot|result|it)\s+(?:conforms|complies|passes|is\s+acceptable)\b"
+    r"|\bis\s+(?:oos|out\s+of\s+spec(?:ification)?|in\s+spec(?:ification)?)\b"
+    r"|\bmeets?\s+the\s+criteria\s+for\s+(?:a\s+)?(?:critical|major|minor)\b"
+    r"|\b(?:counts|qualifies|would\s+be\s+classified|is\s+classified)\s+as\s+(?:a\s+)?(?:critical|major|minor)\b"
+)
+# The AI's sentence must say what its quote says (V6): numbers with their unit and limit direction,
+# no added "not", no dropped "not" or "must". Codes, dates and section numbers are compared separately.
+UNIT = (r"(?:%|°\s?C|º\s?C|degrees?\s+C\b|EU/mg|EU/mL|EU/ml|mg/mL|mg/ml|µg/mL|μg/mL|ug/mL|CFU(?:/[A-Za-z0-9³]+)?"
+        r"|µm|μm|um|mm|cm|mL|ml|mg|µg|μg|ug|kg|g|L|h|hrs?|hours?|minutes?|min|seconds?|sec|s|days?|weeks?|months?"
+        r"|years?|ppm|mbar|bar|kPa|Pa|rpm)(?![A-Za-z])")
+UNIT_ALIASES = {"hr": "h", "hrs": "h", "hour": "h", "hours": "h", "minute": "min", "minutes": "min", "sec": "s",
+                "second": "s", "seconds": "s", "days": "day", "weeks": "week", "months": "month", "years": "year",
+                "um": "µm", "μm": "µm", "ug": "µg", "μg": "µg", "ug/ml": "µg/ml", "μg/ml": "µg/ml", "ºc": "°c",
+                "degrees c": "°c", "degree c": "°c"}
+COMPARATORS = [  # limit direction just before a number; the longer phrases come first
+    ("max", r"≤|=<|\bnot\s+more\s+than|\bno\s+more\s+than|\bup\s+to|\bat\s+most|\bmaximum(?:\s+of)?|\bmax\.?"
+            r"|\bwithin|\bno\s+later\s+than"),
+    ("min", r"≥|>=|\bnot\s+less\s+than|\bno\s+less\s+than|\bat\s+least|\bminimum(?:\s+of)?|\bmin\."),
+    ("max", r"<|\bless\s+than|\bbelow|\bunder|\bfewer\s+than"),
+    ("min", r">|\bmore\s+than|\bgreater\s+than|\babove|\bover|\bexceed(?:s|ing)?"),
+]
+NEGATION = r"\b(?:not|no|never|none|without|cannot|can't|don't|doesn't|mustn't|isn't|aren't|won't)\b"
+LIMIT_PHRASES = r"\b(?:not|no)\s+(?:more|less|later)\s+than\b"  # limits, not negations
+OBLIGATION = r"\b(?:must|shall)\b"
+OBLIGATION_KEPT = r"\b(?:must|shall|required|requires?|need|needs|has\s+to|have\s+to|only)\b"
+REFERENCE_NAMES = (r"\b(?:annex|chapter|part|article|appendix|clause|schedule|step|volume|vol\.?)\s+\d+[a-z]?\b"
+                   r"|\b\d+\s+CFR\b|\bQ\d+[A-Z]?(?:\(R\d\))?")
+CONTEXT_CUES = r"\b(?:not|no|never|cannot|unless|except|only|if|until|without|prior\s+to)\b"
+
 # Scope terms narrow what an answer is about. If a claim names one its cited document never
 # mentions (V10), or the question names one no cited document mentions (V11), the answer may
 # be about a related but different thing (e.g. a syringe shelf life given for "vials").
@@ -137,10 +204,10 @@ CHECKS = {
     "V1": ("An answer must contain at least one cited claim", "hard"),
     "V2": ("Every citation points to a passage retrieved for this question", "hard"),
     "V3": ("Every cited document version is in force right now", "hard"),
-    "V4": ("Every quote appears word for word in its source", "hard"),
+    "V4": ("Every quote appears word for word in its source, as a whole, in context", "hard"),
     "V5": ("Quotes are long enough to be real evidence", "hard"),
-    "V6": ("Numbers in each claim appear in its cited document", "review"),
-    "V7": ("No decision language (release, classification, root cause, CAPA)", "hard"),
+    "V6": ("Each claim's numbers, units, limits and negations match its quote", "hard"),
+    "V7": ("No decision language (release, conformance, classification, root cause, CAPA)", "hard"),
     "V8": ("Injected instructions are neither followed nor repeated", "hard"),
     "V9": ("Draft guidance carries its 'not yet in force' label", "hard"),
     "V10": ("Each claim adds no product form or identifier its cited document doesn't mention", "hard"),
@@ -194,6 +261,12 @@ RULESET = {
     "version": RULESET_VERSION,
     "screen": SCREEN_RULES, "screen_ai_sources": AI_SCREEN_SOURCES, "unnamed_target": UNNAMED_TARGET,
     "followup": {"back_reference": BACK_REFERENCE, "code": CODE},
+    "input": {"confusables": sorted(CONFUSABLES.items()), "foreign_words": sorted(FOREIGN_WORDS),
+              "english_words": sorted(ENGLISH_WORDS), "rules": INPUT_RULES},
+    "criterion_only": {"question": CRITERION_QUESTION, "measured_value": MEASURED_VALUE},
+    "binding": {"reference_names": REFERENCE_NAMES, "unit": UNIT, "unit_aliases": UNIT_ALIASES, "comparators": COMPARATORS, "negation": NEGATION,
+                "limit_phrases": LIMIT_PHRASES, "obligation": OBLIGATION, "obligation_kept": OBLIGATION_KEPT,
+                "context_cues": CONTEXT_CUES, "conformance": CONFORMANCE},
     "pack": {"request": PACK_REQUEST, "sections": PACK_SECTIONS, "earlier_doc_types": EARLIER_DOC_TYPES,
              "procedure_doc_types": PROCEDURE_DOC_TYPES, "cause_words": CAUSE_WORDS, "checks": PACK_CHECKS},
     "validation": {"checks": CHECKS, "quote_min_words": QUOTE_MIN_WORDS, "quote_min_chars": QUOTE_MIN_CHARS,
@@ -259,6 +332,141 @@ def injection_offset(text: str) -> int | None:
     return min(starts) if starts else None
 
 
+def canonical(text: str) -> str:
+    """Text as a person reads it: compatibility forms, no invisible characters, look-alike letters made Latin."""
+    t = unicodedata.normalize("NFKC", text)
+    return plain("".join(ch for ch in t if unicodedata.category(ch) != "Cf").translate(CONFUSABLES))
+
+
+def _script(ch: str) -> str:
+    return "LATIN" if ch in "µμ" else unicodedata.name(ch, "UNKNOWN").split()[0]
+
+
+def mixed_script(text: str) -> bool:
+    """A word mixing alphabets (a Cyrillic 'е' inside 'release') is disguised."""
+    t = "".join(ch for ch in unicodedata.normalize("NFKC", text) if unicodedata.category(ch) != "Cf")
+    return any(len({_script(ch) for ch in word}) > 1 for word in re.findall(r"[^\W\d_]+", t))
+
+
+def unsupported_language(text: str) -> bool:
+    """The rules are written in English: another alphabet, or another language's common words, cannot be screened."""
+    t = canonical(text)
+    if any(ch.isalpha() and _script(ch) != "LATIN" for ch in t):
+        return True
+    words = re.findall(r"[^\W\d_]+", t.casefold())
+    foreign, english = sum(w in FOREIGN_WORDS for w in words), sum(w in ENGLISH_WORDS for w in words)
+    return foreign >= 2 and foreign > english
+
+
+def criterion_only(text: str) -> bool:
+    """Asks whether a measured result passes: the answer may give the acceptance criterion, never the verdict."""
+    t = canonical(text)
+    return bool(re.search(CRITERION_QUESTION, t, re.I) and re.search(MEASURED_VALUE, t, re.I))
+
+
+def _masked(text: str) -> tuple[str, list[str]]:
+    """Text with codes, section and version numbers removed; dates and times returned separately."""
+    t = plain(text)
+    stamps = re.findall(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}:\d{2}\b", t)
+    t = re.sub(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}:\d{2}\b", " ", t)
+    t = re.sub(CODE, " ", t)
+    t = re.sub(r"§\s*\d+(?:\.\d+)*|\bv\d+(?:\.\d+)*\b|\bversion\s+\d+(?:\.\d+)*", " ", t, flags=re.I)
+    t = re.sub(REFERENCE_NAMES, " ", t, flags=re.I)  # "Annex 11", "21 CFR Part 11": names, not values
+    return t, stamps
+
+
+def unbulleted(quote: str) -> str:
+    """A quote without a leading list marker the model may copy from list style ("- ", "* ", "1. ")."""
+    return re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", quote)
+
+
+def _unit(u: str | None) -> str | None:
+    if not u:
+        return None
+    u = re.sub(r"\s+", " ", u.casefold().replace("º", "°")).replace("° c", "°c")
+    return UNIT_ALIASES.get(u, u)
+
+
+def quantities(text: str) -> list[dict]:
+    """Every number in a text with its unit and limit direction; a range shares its unit and direction."""
+    t, _ = _masked(text)
+    found = []
+    for m in re.finditer(rf"(?<![\w.])(\d+(?:\.\d+)?)(?:\s*(?:-|to)\s*(\d+(?:\.\d+)?))?\s*({UNIT})?", t):
+        window = t[max(0, m.start() - 25):m.start()]
+        direction = next((d for d, pattern in COMPARATORS if re.search(rf"(?:{pattern})\s*$", window, re.I)), None)
+        values = {float(m.group(1))} | ({float(m.group(2))} if m.group(2) else set())
+        sign = {"max": "≤ ", "min": "≥ "}.get(direction, "")
+        found.append({"text": sign + m.group(0).strip(), "values": values, "unit": _unit(m.group(3)), "dir": direction})
+    return found
+
+
+def _clauses(text: str, cue: str) -> list[set[str]]:
+    """The content words right after each cue word ("may not be delegated to any person" → delegated, person)."""
+    t = re.sub(LIMIT_PHRASES, " ", plain(text).casefold())
+    return [set(re.findall(r"[a-z]{4,}", t[m.end():m.end() + 60])[:4]) for m in re.finditer(cue, t)]
+
+
+def binding_problems(claim: str, quote: str) -> list[str]:
+    """What the AI's sentence says that its quote does not (V6)."""
+    problems = []
+    said, heard = quantities(claim), quantities(quote)
+    for q in said:
+        same = [h for h in heard if q["values"] & h["values"]]
+        if not same:
+            problems.append(f"'{q['text']}' is not in its quote")
+        elif not any((not q["unit"] or not h["unit"] or q["unit"] == h["unit"])
+                     and (not q["dir"] or not h["dir"] or q["dir"] == h["dir"]) for h in same):
+            problems.append(f"'{q['text']}' but the quote says '{same[0]['text']}'")
+    _, claim_stamps = _masked(claim)
+    _, quote_stamps = _masked(quote)
+    problems += [f"'{s}' is not in its quote" for s in claim_stamps if s not in quote_stamps]
+    claim_words = set(re.findall(r"[a-z]{4,}", plain(claim).casefold()))
+    claim_negates = bool(_clauses(claim, NEGATION))
+    if claim_negates and not _clauses(quote, NEGATION):
+        problems.append("adds a 'not' its quote does not have")
+    if not claim_negates and any(len(c & claim_words) >= 2 for c in _clauses(quote, NEGATION)):
+        problems.append("drops a 'not' that its quote has")
+    if not re.search(OBLIGATION_KEPT, plain(claim), re.I) and any(
+            len(c & claim_words) >= 2 for c in _clauses(quote, OBLIGATION)):
+        problems.append("drops a 'must' or 'shall' that its quote has")
+    return problems
+
+
+_SEP = r"(?:[^\w≤≥<>%./\-+°µμ=]|_)*"
+SENTENCE_START = re.compile(r"[.!?](?=\s)|\n\s*\n|\n\s*(?=[-*#|]|\d+(?:\.\d+)*\s)|\|")
+
+
+def quote_context_problem(quote: str, source: str) -> str | None:
+    """A word-for-word quote can still mislead: cut mid-word or mid-number, without the 'do not' or 'only if'
+    just before it, or joined across table rows (V4)."""
+    chars = evidence_form(quote)
+    src = plain(source).casefold()
+    m = re.search(_SEP.join(re.escape(c) for c in chars), src) if chars else None
+    if m is None:
+        return "could not be placed in its source"
+    s, e = m.start(), m.end()
+    before, after = src[s - 1:s], src[e:e + 1]
+    if before.isalnum() or (before in ".," and s >= 2 and src[s - 2].isdigit() and src[s:s + 1].isdigit()):
+        return "starts in the middle of a word or number"
+    if after.isalnum() or (after in ".," and src[e + 1:e + 2].isdigit() and src[e - 1:e].isdigit()):
+        return "ends in the middle of a word or number"
+    starts = [x.end() for x in SENTENCE_START.finditer(src, 0, s)]
+    if cue := re.search(CONTEXT_CUES, src[(starts[-1] if starts else 0):s]):
+        return f"leaves out '{cue.group(0)}' just before it"
+    lines = src[src.rfind("\n", 0, s) + 1:e].split("\n")
+    if sum(line.lstrip().startswith("|") for line in lines) >= 2:
+        return "joins two table rows"
+    return None
+
+
+def team_answer_problems(text: str) -> list[str]:
+    """Decision wording in a team's free-text answer: it would reach the requester as a verdict."""
+    t = canonical(text)
+    found = [f"{r['rule']}: {r['title']}" for r in screen_rules(t, [])]
+    found += [f"'{m.group(0)}'" for pattern in (PROHIBITED_LANGUAGE, CONFORMANCE) if (m := re.search(pattern, t, re.I))]
+    return found
+
+
 # --- Gate 1 ----------------------------------------------------------------------
 
 def screen_rules(question: str, named_records: list[dict]) -> list[dict]:
@@ -279,8 +487,11 @@ def screen_rules(question: str, named_records: list[dict]) -> list[dict]:
 
 def screen_texts(texts: list[str], named_records: list[dict]) -> list[dict]:
     """screen_rules over every reading of one request (as typed, as rewritten, with carried targets)."""
-    fired = {f["rule"]: f for t in texts for f in screen_rules(t, named_records)}
-    return [fired[r] for r in SCREEN_RULES if r in fired]
+    fired = {f["rule"]: f for t in texts for f in screen_rules(canonical(t), named_records)}
+    out = [fired[r] for r in SCREEN_RULES if r in fired]
+    if any(mixed_script(t) or unsupported_language(t) for t in texts):
+        out.append({"rule": "S7", "title": INPUT_RULES["S7"]["title"]})
+    return out
 
 
 def carried_targets(message: str, earlier: list[str]) -> str:
@@ -339,26 +550,28 @@ def validate(question: str, draft: dict, hits: list[Hit], in_force: dict[int, bo
              for r in cited if not in_force.get(r["hit"].document_id, False)]
     add("V3", stale)
 
+    for r in resolved:
+        r["quote"] = unbulleted(r["quote"])
     not_verbatim = [f"claim {r['n']}: quote not found word for word in {r['hit'].code} §{r['hit'].section}"
                     for r in cited
                     if not evidence_form(r["quote"]) or evidence_form(r["quote"]) not in evidence_form(r["hit"].text)]
+    not_verbatim += [f"claim {r['n']}: the quote {problem}" for r in cited
+                     if evidence_form(r["quote"]) and evidence_form(r["quote"]) in evidence_form(r["hit"].text)
+                     and (problem := quote_context_problem(r["quote"], r["hit"].text))]
     add("V4", not_verbatim)
 
     too_short = [f"claim {r['n']}: quote '{r['quote']}' is too short to be evidence" for r in resolved
                  if len(r["quote"].split()) < QUOTE_MIN_WORDS and len(evidence_form(r["quote"])) < QUOTE_MIN_CHARS]
     add("V5", too_short)
 
-    unsupported = []
-    for r in cited:
-        evidence = document_text(r["hit"])
-        absent = sorted({n for n in re.findall(NUMBER, plain(r["text"]))
-                         if not re.search(WHOLE_NUMBER.format(re.escape(n)), evidence)})
-        if absent:
-            unsupported.append(f"claim {r['n']}: {', '.join(absent)} not in {r['hit'].code}")
-    add("V6", unsupported)
+    mismatched = [f"claim {r['n']}: {problem}" for r in resolved for problem in binding_problems(r["text"], r["quote"])]
+    add("V6", mismatched)
 
     forbidden = [f"claim {r['n']}: '{m.group(0)}'" for r in resolved
                  if (m := re.search(PROHIBITED_LANGUAGE, plain(r["text"]), re.I))]
+    forbidden += [f"claim {r['n']}: '{m.group(0)}'" for r in resolved  # unless the cited passage itself says it
+                  if (m := re.search(CONFORMANCE, plain(r["text"]), re.I))
+                  and not re.search(CONFORMANCE, plain(r["quote"]), re.I)]
     add("V7", forbidden)
 
     echoed = []

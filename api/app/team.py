@@ -9,6 +9,7 @@ shown as such and never grounds an AI answer.
 
 import psycopg
 
+from app.assurance import team_answer_problems
 from app.audit import append_event
 
 TEAMS = {"quality-assurance": "Quality Assurance", "quality-control": "Quality Control",
@@ -30,9 +31,10 @@ ASK_SQL = "SELECT payload FROM audit_log WHERE seq = %s AND event_type = 'ask'"
 
 
 class TeamInputRefused(Exception):
-    def __init__(self, status: int, message: str):
+    def __init__(self, status: int, message: str, recorded: bool = False):
         super().__init__(message)
         self.status = status
+        self.recorded = recorded  # the refusal was written to the audit trail: the caller commits it
 
 
 def _viewer(conn: psycopg.Connection, persona: str) -> tuple:
@@ -113,6 +115,13 @@ def answer_request(conn: psycopg.Connection, persona: str, request_seq: int, ans
         raise TeamInputRefused(409, "This request has already been answered.")
     if not item["can_answer"]:
         raise TeamInputRefused(403, f"Only a member of {item['team']['name']} can answer this request.")
+    if problems := team_answer_problems(answer):  # a team answer may not carry a GMP decision either
+        append_event(conn, f"user:{persona}"[:80], "team_answer_refused",
+                     {"request_seq": request_seq, "ask_seq": item["ask_seq"], "persona": persona, "problems": problems})
+        raise TeamInputRefused(422, "This answer reads as a decision (" + "; ".join(problems) + "). Team answers "
+                               "cannot release batches, classify deviations, set root causes or CAPAs, or say a "
+                               "result meets its specification. Please state the facts, or raise it with QA.",
+                               recorded=True)
     entry = append_event(conn, f"user:{persona}"[:80], "team_answer",
                          {"request_seq": request_seq, "ask_seq": item["ask_seq"], "team": item["team"]["id"],
                           "answer": answer, "persona": persona})
