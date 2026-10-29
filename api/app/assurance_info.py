@@ -223,7 +223,9 @@ def catalogue() -> dict:
     return {
         "ruleset": {"version": assurance.RULESET_VERSION, "fingerprint": assurance.RULESET_FINGERPRINT},
         "screen_rules": [{"id": "S0", "title": "Unknown user", "note": "Anyone not signed in as a known user is refused."}]
-        + [{"id": rid, "title": r["title"], "note": SCREEN_NOTES[rid]} for rid, r in assurance.SCREEN_RULES.items()],
+        + [{"id": rid, "title": r["title"], "note": SCREEN_NOTES[rid],
+            "sources": list(dict.fromkeys(f"{s['doc']} §{s['section']}" for s in r["sources"]))}
+           for rid, r in assurance.SCREEN_RULES.items()],
         "checks": [{"id": cid, "title": title, "severity": severity, "note": CHECK_NOTES[cid]}
                    for cid, (title, severity) in assurance.CHECKS.items()],
         "tier_rules": TIER_RULES,

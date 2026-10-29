@@ -125,6 +125,7 @@ export function Citations({ citations }: { citations: Citation[] }) {
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-ink px-1 text-[11px] font-semibold text-white">{c.n}</span>
             <CitationChip c={c} />
+            {c.title && <span className="text-body">{c.title}</span>}
             {c.page != null && <span className="text-xs text-faint">page {c.page}</span>}
           </div>
           {c.quotes.map((quote) => <Quote key={quote}>{quote}</Quote>)}

@@ -6,6 +6,8 @@
 import pytest
 
 from app.assurance import (
+    AI_SCREEN_SOURCES,
+    SCREEN_RULES,
     evidence_form,
     injection_offset,
     release,
@@ -200,3 +202,10 @@ def test_review_reasons_name_the_check_not_the_draft():
     t, reasons = tier("What is the deadline?", SCREEN_OK, [hit()], checks)
     assert t == "T2" and any(r.startswith("V6") for r in reasons)
     assert "48" not in " ".join(reasons)  # a held draft must not leak through its reasons
+
+def test_every_refusal_rule_names_the_documents_it_rests_on():
+    for rule_id, rule in SCREEN_RULES.items():
+        assert rule["sources"], f"{rule_id} has no source document"
+    for s in [s for r in SCREEN_RULES.values() for s in r["sources"]] + AI_SCREEN_SOURCES:
+        assert s["doc"] and s["section"] and len(s["quote"].split()) >= 3, s
+

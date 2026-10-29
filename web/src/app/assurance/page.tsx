@@ -114,6 +114,9 @@ async function Rules() {
               <li key={r.id} className="py-2 text-sm">
                 <p><Mono className="font-semibold">{r.id}</Mono> <span className="text-strong">{r.title}</span></p>
                 <p className="text-xs text-faint">{r.note}</p>
+                {r.sources && r.sources.length > 0 && (
+                  <p className="mt-0.5 text-xs text-muted">Rests on <Mono>{r.sources.join(" · ")}</Mono></p>
+                )}
               </li>
             ))}
           </ul>

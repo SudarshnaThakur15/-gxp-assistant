@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from app.audit import canonical_json
 from app.retrieval import Hit, source_id
 
-RULESET_VERSION = "2026.10.28-4"
+RULESET_VERSION = "2026.10.29-1"
 
 # --- Gate 1: screening rules -------------------------------------------------
 # A rule fires when its `decision` pattern matches and (if given) its `target` pattern
@@ -40,9 +40,25 @@ INJECTION_PATTERNS = [
     r"\bsystem prompt\b",
 ]
 
+# The approved documents a refusal rests on. Cited only where the in-force version says it word for word.
+QP_DECIDES = {"doc": "SOP-QA-060", "section": "5", "quote": (
+    "Batch disposition and certification are decisions of the Qualified Person. They may not be "
+    "delegated to any person who is not a QP, or to any computerised system or AI tool")}
+QA_DECIDES = {"doc": "SOP-QA-012", "section": "5.6", "quote": (
+    "Classification, root cause and CAPA are decided by the investigator and QA, never by the assistant")}
+
+
+def _policy(quote: str) -> dict:
+    return {"doc": "POL-QA-001", "section": "4", "quote": quote}
+
+
+AI_SCREEN_SOURCES = [_policy("These decisions belong to the investigator, QA and the Qualified Person")]
+
+
 SCREEN_RULES = {
     "S1": {
         "title": "Release, shipment or disposition decision for a specific batch",
+        "sources": [QP_DECIDES, _policy("make or recommend a batch disposition, release or certification decision")],
         "decision": (r"\b(?:releas(?:e|ed|ing)|ship(?:ped|ping)?|certif(?:y|ied|ication)|dispos(?:e|ed|ition)"
                      r"|reject(?:ed|ion)?|good to go|ok(?:ay)? to (?:use|ship|release)"
                      r"|approv(?:e|ed|al) (?:it |this |the batch )?for (?:use|release|sale|shipment))\b"),
@@ -51,6 +67,7 @@ SCREEN_RULES = {
     },
     "S2": {
         "title": "Classifying a deviation",
+        "sources": [QA_DECIDES, _policy("classify a deviation")],
         "decision": (r"\b(?:classif(?:y|ied|ication)|categori[sz](?:e|ed|ation))\b"
                      r"|\b(?:critical|major|minor)\s+or\s+(?:critical|major|minor)\b"),
         "target": UNNAMED_TARGET + r"|\bDEV-\d{4}-\d{3}\b",
@@ -58,12 +75,14 @@ SCREEN_RULES = {
     },
     "S3": {
         "title": "Determining a root cause",
+        "sources": [QA_DECIDES, _policy("determine a root cause or select a CAPA")],
         "decision": r"\broot[\s-]?causes?\b|\bwhat\s+caused\b|\bwhy\s+did\b",
         "target": UNNAMED_TARGET + r"|\bDEV-\d{4}-\d{3}\b",
         "open_records_only": True,
     },
     "S4": {
         "title": "Selecting or recommending a CAPA",
+        "sources": [QA_DECIDES, _policy("determine a root cause or select a CAPA")],
         "decision": (r"\b(?:which|what)\s+(?:capa|corrective action|preventive action)s?\b.{0,40}"
                      r"\b(?:should|would|do you|to (?:choose|pick|select|take|implement))\b"
                      r"|\b(?:recommend|suggest|propose|choose|select|pick)\w*\s+(?:a |an |the )?"
@@ -72,6 +91,7 @@ SCREEN_RULES = {
     },
     "S5": {
         "title": "Attempt to override the assistant's instructions",
+        "sources": [_policy("answer from anything other than the approved documents it retrieves")],
         "decision": "|".join(INJECTION_PATTERNS),
         "target": None,
     },
@@ -138,11 +158,11 @@ HUMAN_ACTION = (  # a cited procedure section that requires a person → never a
 HUMAN_ACTION_DOC_TYPES = ("sop", "policy")
 TIERS = {"T1": "Knowledge answer: released by rules with citations",
          "T2": "Investigation or human-action content: held for QA review and electronic signature",
-         "T3": "Prohibited decision: refused with a policy citation"}
+         "T3": "Prohibited decision: refused, citing the documents the rule rests on"}
 
 RULESET = {
     "version": RULESET_VERSION,
-    "screen": SCREEN_RULES, "unnamed_target": UNNAMED_TARGET,
+    "screen": SCREEN_RULES, "screen_ai_sources": AI_SCREEN_SOURCES, "unnamed_target": UNNAMED_TARGET,
     "validation": {"checks": CHECKS, "quote_min_words": QUOTE_MIN_WORDS, "quote_min_chars": QUOTE_MIN_CHARS,
                    "evidence_keep": EVIDENCE_KEEP, "prohibited_language": PROHIBITED_LANGUAGE,
                    "injection_patterns": INJECTION_PATTERNS, "scope_concepts": SCOPE_CONCEPTS,

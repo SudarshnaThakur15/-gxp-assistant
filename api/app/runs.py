@@ -42,6 +42,7 @@ FILTERS = {  # list filter → outcomes it includes
 }
 
 VIEWER_SQL = "SELECT id, name, can_sign, role FROM users WHERE id = %s"
+TITLES_SQL = "SELECT code, version, title FROM documents WHERE code = ANY (%s)"
 VISIBLE_RUNS = """
   FROM audit_log a
   JOIN users q ON q.id = a.payload ->> 'persona'
@@ -156,6 +157,15 @@ def _event_text(event_type: str, payload: dict) -> str:
     return f"Signature attempt refused ({payload.get('code')}): {payload.get('detail')}"
 
 
+def _with_titles(conn: psycopg.Connection, citations: list[dict]) -> list[dict]:
+    """Citations as shown: the document's title beside its code, never the internal fingerprint."""
+    titles = {}
+    if codes := list({c["doc"] for c in citations}):
+        titles = {(code, v): t for code, v, t in conn.execute(TITLES_SQL, (codes,)).fetchall()}
+    return [{k: v for k, v in c.items() if k != "document_fingerprint"}
+            | {"title": c.get("title") or titles.get((c["doc"], c["version"]))} for c in citations]
+
+
 def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
     """One run as this viewer may see it. None = not visible to them."""
     rows = visible_rows(conn, viewer, seq)
@@ -175,8 +185,7 @@ def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
     elif o == "not_found":
         answer = {"text": NOT_FOUND, "withheld": False}
     if answer and o != "not_found":
-        answer["citations"] = [{k: val for k, val in c.items() if k != "document_fingerprint"}
-                               for c in recorded_citations(p)]
+        answer["citations"] = _with_titles(conn, recorded_citations(p))
         answer["notices"] = p.get("notices", []) if o == "released" else []
     show_details = answer is not None or sees_drafts  # check details quote the draft
     checks = [c if show_details else c | {"detail": None} for c in p.get("checks") or []]
@@ -188,7 +197,8 @@ def run_detail(conn: psycopg.Connection, viewer: str, seq: int) -> dict | None:
         "question": p["question"], "requested_by": {"id": req_id, "name": req_name}, "test": is_test,
         "outcome": o, "label": LABELS[o], "decision": p["decision"], "answer_type": p["answer_type"],
         "tier": p["tier"], "reasons": public_reasons(p), "error": public_reason(p.get("error")),
-        "answer": answer, "checks": checks, "trace": _trace(seq, hash_, p, LABELS[o]),
+        "answer": answer, "rule_sources": _with_titles(conn, p.get("refusal_sources") or []),
+        "checks": checks, "trace": _trace(seq, hash_, p, LABELS[o]),
         "model": _model(p), "ruleset": p["ruleset"], "ms": p.get("ms", {}),
         "review": None if review is None else {
             "audit_seq": review_seq, "audit_hash": review_hash, "outcome": review["outcome"],

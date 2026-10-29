@@ -25,7 +25,6 @@ from app.retrieval import source_id
 
 NOT_FOUND = "Not found in the approved documentation available to you."
 INJECTION_NOTICE = "A retrieved record contains text addressed to AI systems. It was treated as data and ignored."
-POLICY = {"code": "POL-QA-001", "section_prefix": "4 ", "quote": "The assistant must refuse to"}
 
 PERSONA_SQL = """
 SELECT u.id, d.code, d.doc_type, d.record_state
@@ -37,13 +36,14 @@ SELECT u.id, d.code, d.doc_type, d.record_state
  WHERE u.id = %(persona)s
 """
 IN_FORCE_SQL = "SELECT id, status = 'effective' FROM documents WHERE id = ANY (%s)"
-POLICY_SQL = """
-SELECT d.code, d.version, c.section_path, c.page, c.text
+SOURCE_SQL = """
+SELECT d.code, d.version, d.title, c.section_path, c.page, c.text, d.fingerprint
   FROM chunks c JOIN documents d ON d.id = c.document_id
- WHERE d.code = %s AND d.status = 'effective' AND c.section_path LIKE %s
- ORDER BY c.ordinal LIMIT 1
+  JOIN users u ON u.id = %(persona)s
+ WHERE d.code = %(code)s AND d.status = 'effective' AND d.client_id IS NULL
+   AND d.tenant_id IN (u.tenant_id, 'public') AND c.section_path LIKE %(section)s
+ ORDER BY c.ordinal
 """
-
 
 def _ms(start: float) -> int:
     return round((time.perf_counter() - start) * 1000)
@@ -72,12 +72,20 @@ def _render(resolved: list[dict]) -> tuple[str, list[dict]]:
     return " ".join(sentences), citations
 
 
-def _policy_citation(conn: psycopg.Connection) -> dict | None:
-    """Refusals cite the in-force intended-use policy, and only if it really says so."""
-    row = conn.execute(POLICY_SQL, (POLICY["code"], POLICY["section_prefix"] + "%")).fetchone()
-    if row is None or assurance.evidence_form(POLICY["quote"]) not in assurance.evidence_form(row[4]):
-        return None
-    return {"n": 1, "doc": row[0], "version": row[1], "section": row[2], "page": row[3], "quotes": [POLICY["quote"]]}
+def _rule_sources(conn: psycopg.Connection, persona: str, sources: list[dict]) -> list[dict]:
+    """A refusal cites the in-force documents its rule rests on, and only where they say it word for word."""
+    cited: dict[tuple, dict] = {}
+    for s in sources:
+        rows = conn.execute(SOURCE_SQL, {"persona": persona, "code": s["doc"], "section": s["section"] + " %"}).fetchall()
+        row = next((x for x in rows if assurance.evidence_form(s["quote"]) in assurance.evidence_form(x[5])), None)
+        if row is None:
+            continue
+        c = cited.setdefault((row[0], row[1], row[3]), {
+            "n": len(cited) + 1, "doc": row[0], "version": row[1], "title": row[2], "section": row[3],
+            "page": row[4], "document_fingerprint": row[6], "quotes": []})
+        if s["quote"] not in c["quotes"]:
+            c["quotes"].append(s["quote"])
+    return list(cited.values())
 
 
 def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: float | None = None) -> dict:
@@ -159,7 +167,8 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
                        "Batch release and disposition, deviation classification, root cause and CAPA selection "
                        "belong to the investigator, QA and the Qualified Person. "
                        "I can find the relevant records and procedures instead.")
-            citations = [c for c in [_policy_citation(conn)] if c]
+            sources = [s for x in screen["rules"] for s in assurance.SCREEN_RULES[x["rule"]]["sources"]]
+            citations = _rule_sources(conn, persona, sources or assurance.AI_SCREEN_SOURCES)
         elif answer_type == "error":
             message, citations = "Refused. The assistant could not complete this request safely, so nothing was released.", []
         else:
@@ -218,6 +227,7 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
         "notices": notices,
         "released_text": message if decision == "released" else None,
         "withheld_draft": text if decision == "held_for_review" else None,
+        "refusal_sources": citations if answer_type == "refusal" else None,
         "ms": ms,
     }
     seq_hash = append_event(conn, f"user:{persona}"[:80], "ask", payload)
@@ -229,7 +239,8 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, max_wait_s: fl
     return {
         "decision": decision, "decision_label": assurance.DECISION_LABELS[decision], "answer_type": answer_type,
         "tier": tier, "reasons": reasons, "message": message,
-        "citations": citations if decision != "held_for_review" else [],
+        "citations": [{k: v for k, v in c.items() if k != "document_fingerprint"} for c in citations]
+                     if decision != "held_for_review" else [],
         "notices": notices if decision == "released" else [],
         "receipt": {"audit_seq": seq_hash["seq"], "audit_hash": seq_hash["hash"],
                     "ruleset_version": assurance.RULESET_VERSION},

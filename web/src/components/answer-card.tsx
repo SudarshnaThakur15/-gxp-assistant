@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { Tabs } from "@/components/tabs";
 import { ByBadge, CheckList, CitationChip, Citations, formatTime, Mono, Pill, TONE_PILL } from "@/components/ui";
-import type { Gate, RunDetail } from "@/lib/api";
+import type { Citation, Gate, RunDetail } from "@/lib/api";
 import { GATE_PLAIN, plainReasons, STATUS } from "@/lib/plain";
 
 // One answer: a plain status line and the answer first; the proof one click away in tabs.
@@ -28,7 +28,7 @@ export function AnswerCard({ run, viewerId }: { run: RunDetail; viewerId: string
         <Tabs
           items={[
             { id: "answer", label: "Answer", content: <AnswerTab run={run} isRequester={isRequester} /> },
-            { id: "sources", label: "Sources", count: citations.length, content: <SourcesTab run={run} /> },
+            { id: "sources", label: "Sources", count: citations.length || run.rule_sources.length, content: <SourcesTab run={run} /> },
             { id: "checks", label: "Checks", count: counted || undefined, content: <ChecksTab run={run} passed={passed} counted={counted} /> },
             { id: "trace", label: "How it ran", content: <TraceTab run={run} /> },
             { id: "record", label: "Record", content: <RecordTab run={run} /> },
@@ -39,7 +39,7 @@ export function AnswerCard({ run, viewerId }: { run: RunDetail; viewerId: string
   );
 }
 
-function Reasons({ run, title }: { run: RunDetail; title: string }) {
+function Reasons({ run, title, sources = [] }: { run: RunDetail; title: string; sources?: Citation[] }) {
   const reasons = plainReasons(run.reasons);
   if (!reasons.length) return null;
   return (
@@ -48,7 +48,15 @@ function Reasons({ run, title }: { run: RunDetail; title: string }) {
       <ul className="mt-1.5 flex list-disc flex-col gap-1 pl-5 text-sm text-body">
         {reasons.map((r) => <li key={r}>{r}</li>)}
       </ul>
-      <p className="mt-2 text-xs text-faint">Decided by fixed rules, not by the AI.</p>
+      {sources.length > 0 && (
+        <div className="mt-4 border-t border-line-soft pt-3">
+          <p className="mb-2.5 text-sm font-semibold text-strong">Where this rule comes from</p>
+          <Citations citations={sources} />
+        </div>
+      )}
+      <p className="mt-3 text-xs text-faint">
+        Decided by fixed rules, not by the AI.{sources.length > 0 && " Quoted word for word from the approved versions in force."}
+      </p>
     </div>
   );
 }
@@ -85,14 +93,17 @@ function AnswerTab({ run, isRequester }: { run: RunDetail; isRequester: boolean 
             <p key={n} className="rounded-lg bg-brand-soft px-3 py-2 text-sm text-brand-text">{n}</p>
           ))}
           {citations.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 text-sm">
+            <div className="flex flex-col gap-1.5 text-sm">
               <span className="text-faint">Sources</span>
-              {citations.map((c) => (
-                <span key={c.n} className="flex items-center gap-1">
-                  <span className="text-xs font-semibold text-faint">[{c.n}]</span>
-                  <CitationChip c={c} />
-                </span>
-              ))}
+              <ul className="flex flex-col gap-1.5">
+                {citations.map((c) => (
+                  <li key={c.n} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-xs font-semibold text-faint">[{c.n}]</span>
+                    <CitationChip c={c} />
+                    {c.title && <span className="text-muted">{c.title}</span>}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>
@@ -103,9 +114,8 @@ function AnswerTab({ run, isRequester }: { run: RunDetail; isRequester: boolean 
           Try naming the document (for example SOP-QA-012), or check that the question is about a programme you work on.
         </p>
       )}
-      {(run.outcome === "held" || run.outcome === "refused") && (
-        <Reasons run={run} title={run.outcome === "refused" ? "Why it can't be answered" : "Why a person checks it first"} />
-      )}
+      {run.outcome === "held" && <Reasons run={run} title="Why a person checks it first" />}
+      {run.outcome === "refused" && <Reasons run={run} title="Why it can't be answered" sources={run.rule_sources} />}
     </div>
   );
 }
@@ -117,6 +127,16 @@ function SourcesTab({ run }: { run: RunDetail }) {
       <div className="flex flex-col gap-4">
         <Citations citations={citations} />
         <p className="text-xs text-faint">Only approved versions in force are quoted, and every quote was checked word for word.</p>
+      </div>
+    );
+  }
+  if (run.rule_sources.length) {
+    return (
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-body">
+          Nothing was searched: a fixed rule stopped the question first. These approved documents are what the rule rests on.
+        </p>
+        <Citations citations={run.rule_sources} />
       </div>
     );
   }

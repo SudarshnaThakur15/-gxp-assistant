@@ -70,6 +70,7 @@ export type Citation = {
   section: string;
   page: number | null;
   quotes: string[];
+  title?: string | null;
 };
 
 export type Check = {
@@ -158,6 +159,7 @@ export type RunDetail = {
   reasons: string[];
   error: string | null;
   answer: { text: string; withheld: boolean; citations?: Citation[]; notices?: string[] } | null;
+  rule_sources: Citation[]; // a refusal: the approved documents its rule rests on
   checks: Check[];
   trace: Gate[];
   model: string | null;
@@ -262,7 +264,7 @@ export type DocumentDetail = Omit<DocumentSummary, "sections"> & {
 
 export type AssuranceInfo = {
   ruleset: { version: string; fingerprint: string };
-  screen_rules: { id: string; title: string; note: string }[];
+  screen_rules: { id: string; title: string; note: string; sources?: string[] }[];
   checks: { id: string; title: string; severity: "hard" | "review"; note: string }[];
   tier_rules: { id: string; rule: string; outcome: string }[];
   stats: {
