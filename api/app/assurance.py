@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from app.audit import canonical_json
 from app.retrieval import Hit, source_id
 
-RULESET_VERSION = "2026.10.29-3"
+RULESET_VERSION = "2026.10.30-1"
 
 # --- Gate 1: screening rules -------------------------------------------------
 # A rule fires when its `decision` pattern matches and (if given) its `target` pattern
@@ -635,8 +635,12 @@ def validate_pack(subject: str, resolved: list[dict]) -> list[Check]:
 
 # --- Gate 5 ----------------------------------------------------------------------
 
-def tier(question: str, screen: dict, cited: list[Hit], checks: list[Check]) -> tuple[str, list[str]]:
-    """Consequence tier from the task type and fixed rules. AI input can only raise it."""
+def tier(question: str, screen: dict, cited: list[Hit], checks: list[Check],
+         quotes: dict[str, list[str]] | None = None) -> tuple[str, list[str]]:
+    """Consequence tier from the task type and fixed rules. AI input can only raise it.
+
+    `quotes`: the words each cited passage is quoted for (by source id). R-HUMAN reads those, not the
+    whole section, so pointing to a procedure doesn't count as telling someone to act on it."""
     if screen["refused"]:
         return "T3", [f"{r['rule']}: {r['title']}" for r in screen["rules"]] or ["AI screen: prohibited decision"]
     reasons = []
@@ -647,7 +651,8 @@ def tier(question: str, screen: dict, cited: list[Hit], checks: list[Check]) -> 
     for h in {source_id(h): h for h in cited}.values():
         if h.doc_type in INVESTIGATION_DOC_TYPES:
             reasons.append(f"R-INV-DOC: cites {h.code}, a {h.doc_type} record")
-        if h.doc_type in HUMAN_ACTION_DOC_TYPES and (m := re.search(HUMAN_ACTION, plain(h.text), re.I)):
+        quoted = " ".join(quotes[source_id(h)]) if quotes and source_id(h) in quotes else h.text
+        if h.doc_type in HUMAN_ACTION_DOC_TYPES and (m := re.search(HUMAN_ACTION, plain(quoted), re.I)):
             reasons.append(f"R-HUMAN: {h.code} §{h.section} requires a person ('{m.group(0)}')")
     reasons += [f"{c.id}: {c.title}" for c in checks  # titles only: details quote the withheld draft
                 if c.severity == "review" and c.status == "fail"]

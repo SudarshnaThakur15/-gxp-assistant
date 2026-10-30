@@ -49,7 +49,7 @@ TIER_RULES = [
     {"id": "R-INV-Q", "rule": "The question asks for an investigation (history, previous events, a DEV or CAPA number)", "outcome": "T2: held for review"},
     {"id": "R-INV-AI", "rule": "The AI screen classified it as investigation support (the AI can raise the tier, never lower it)", "outcome": "T2: held for review"},
     {"id": "R-INV-DOC", "rule": "The answer cites a deviation or CAPA record", "outcome": "T2: held for review"},
-    {"id": "R-HUMAN", "rule": "A cited procedure section requires a person to act: approve, sign, notify, quarantine, report to QA", "outcome": "T2: held for review"},
+    {"id": "R-HUMAN", "rule": "The words quoted from a procedure require a person to act: approve, sign, notify, quarantine, report to QA", "outcome": "T2: held for review"},
     {"id": "Review checks", "rule": "V11 failed", "outcome": "T2: held for review"},
     {"id": "T1", "rule": "None of the above, and every blocking check passed", "outcome": "Answered straight away, with sources"},
 ]
@@ -178,7 +178,11 @@ def run_lab() -> dict:
                                                                      for h in hits}, injected={
             f"c{h.chunk_id}": off for h in hits if (off := assurance.injection_offset(h.text)) is not None})
         cited = [r["hit"] for r in resolved if r["hit"] is not None]
-        tier_, reasons = tier(question, SCREEN_PASSED, cited, checks)
+        quotes = {}
+        for r in resolved:
+            if r["hit"] is not None:
+                quotes.setdefault(f"c{r['hit'].chunk_id}", []).append(r["quote"])
+        tier_, reasons = tier(question, SCREEN_PASSED, cited, checks, quotes)
         decision = release(tier_, "answer", checks)
         triggered = [c.id for c in checks if c.status in ("fail", "fixed")] + [r.split(":")[0] for r in reasons
                                                                               if r.startswith("R-")]

@@ -147,6 +147,15 @@ def _chat_turns(conn: psycopg.Connection, persona: str, chat_id: str) -> list[di
              "shown": _shown(p, review)} for seq, p, review in rows]
 
 
+def _quotes(resolved: list[dict]) -> dict[str, list[str]]:
+    """The quotes the answer uses, per cited passage."""
+    out: dict[str, list[str]] = {}
+    for c in resolved:
+        if c["hit"] is not None and c.get("quote"):
+            out.setdefault(retrieval.source_id(c["hit"]), []).append(c["quote"])
+    return out
+
+
 def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str | None = None,
         max_wait_s: float | None = None) -> dict:
     started = time.perf_counter()
@@ -258,7 +267,7 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
     if answer_type == "error":
         tier, reasons = "n/a", [error]
     else:
-        tier, reasons = assurance.tier(asked, screen, cited, checks)
+        tier, reasons = assurance.tier(asked, screen, cited, checks, _quotes(resolved))
     decision = assurance.release(tier, answer_type, checks)
 
     text, citations = _render([c for c in resolved if c["hit"] is not None])

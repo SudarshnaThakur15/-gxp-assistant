@@ -373,3 +373,15 @@ def test_regulation_names_are_not_values_and_list_bullets_are_forgiven():
                                  "- DEV-2026-021 (post-use filter integrity test failure, batch CRV-26-044).", source,
                                  question="Have we had filter integrity test failures before?")
     assert "V4" not in failures, failures
+
+
+def test_human_action_reads_the_quote_not_the_whole_section():
+    # Pointing to the investigation procedure is not telling anyone to approve something.
+    sop = hit(code="SOP-QA-012", section="5.3 Investigation",
+              text="Deviations are investigated under this SOP, including out-of-specification results. "
+                   "QA approves the investigation report.")
+    pointer = {"c1": ["Deviations are investigated under this SOP, including out-of-specification results."]}
+    action = {"c1": ["QA approves the investigation report."]}
+    assert tier("Which SOP applies to investigating an OOS result?", SCREEN_OK, [sop], [], pointer) == ("T1", [])
+    t, reasons = tier("Who approves the investigation report?", SCREEN_OK, [sop], [], action)
+    assert t == "T2" and reasons[0].startswith("R-HUMAN")

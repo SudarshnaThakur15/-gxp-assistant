@@ -36,7 +36,7 @@ const REASONS: [RegExp, string][] = [
   [/^R-INV-Q\b/, "It asks about investigations or past events, so QA checks the answer before you use it."],
   [/^R-INV-AI\b/, "It looks like investigation support, so QA checks the answer before you use it."],
   [/^R-INV-DOC\b/, "It quotes a deviation or CAPA record, so QA checks the answer before you use it."],
-  [/^R-HUMAN\b/, "The procedure it quotes requires a person to act, so QA confirms it before you use it."],
+  [/^R-HUMAN\b/, "The words it quotes from a procedure require a person to act, so QA confirms it before you use it."],
   [/^V1\b/, "The draft contained nothing that could be checked."],
   [/^V2\b/, "The draft cited a passage it was never given."],
   [/^V3\b/, "The draft cited a document version that is no longer in force."],
