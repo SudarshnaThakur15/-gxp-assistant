@@ -325,8 +325,9 @@ def ask(conn: psycopg.Connection, persona: str, question: str, *, chat_id: str |
             "llm": screen.get("llm")},
         "retrieval": None if r is None else {
             "params": {"top_k": retrieval.TOP_K, "max_per_doc": retrieval.MAX_PER_DOC,
-                       "min_similarity": retrieval.MIN_SIMILARITY},
-            "found": r.found, "best_similarity": r.best_similarity, "excluded": r.excluded,
+                       "min_similarity": retrieval.MIN_SIMILARITY, "keyword_floor": retrieval.KEYWORD_FLOOR,
+                       "keyword_share": retrieval.KEYWORD_SHARE},
+            "found": r.found, "found_by": r.found_by, "best_similarity": r.best_similarity, "excluded": r.excluded,
             "passages": [{"id": source_id(h), "doc": h.code, "version": h.version, "section": h.section,
                           "page": h.page, "document_fingerprint": h.fingerprint, "score": round(h.score, 5),
                           "injection_flagged": source_id(h) in injected} for h in hits]},

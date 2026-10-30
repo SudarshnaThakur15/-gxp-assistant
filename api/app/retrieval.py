@@ -27,6 +27,15 @@ MAX_PER_DOC = 2
 MAX_NAMED_CHUNKS = 10  # bound for documents named in the question (token budget)
 RRF_K = 60
 MIN_SIMILARITY = 0.70  # best similarity below this = clearly off-topic → "not found" (can only make outcomes stricter)
+# A short question has little meaning to compare, so it can score under MIN_SIMILARITY on exactly the right
+# passage. Between the floor and MIN_SIMILARITY a passage still counts if it contains most of the question's
+# key words; off-topic questions share none, so they stay "not found".
+KEYWORD_FLOOR = 0.50
+KEYWORD_SHARE = 0.6    # share of the question's key words one passage must contain (and at least two)
+STOPWORDS = frozenset(
+    "what which when where does have that this with from about into there their they them should would could "
+    "must tell give show please list many much need want know your ours were been being also only than then "
+    "some such very".split())
 
 
 @dataclass
@@ -54,6 +63,7 @@ class Retrieval:
     hits: list[Hit]
     found: bool
     best_similarity: float
+    found_by: str | None = None  # "named" | "similarity" | "keywords"; None when not found
     excluded: list[dict] = field(default_factory=list)
     ms: dict = field(default_factory=dict)
 
@@ -61,6 +71,23 @@ class Retrieval:
 def source_id(hit: Hit) -> str:
     """Stable id the model uses to cite a passage in this request."""
     return f"c{hit.chunk_id}"
+
+
+def key_terms(question: str) -> list[str]:
+    """Content words of a question (stems of six letters at most), in order, without duplicates."""
+    words = (w.lower() for w in re.findall(r"[A-Za-z]{4,}", question))
+    return list(dict.fromkeys(w[:6] for w in words if w not in STOPWORDS))
+
+
+def keyword_support(terms: list[str], text: str) -> int:
+    """How many of the key terms start a word in the passage."""
+    return sum(1 for term in terms if re.search(rf"\b{re.escape(term)}", text, re.I))
+
+
+def keyword_match(question: str, hits: list["Hit"]) -> bool:
+    terms = key_terms(question)
+    need = max(2, -(-len(terms) * KEYWORD_SHARE // 1))  # ceil
+    return any(h.similarity >= KEYWORD_FLOOR and keyword_support(terms, h.text) >= need for h in hits)
 
 
 def keyword_query(question: str) -> str:
@@ -188,6 +215,7 @@ def retrieve(conn: psycopg.Connection, persona: str, question: str, others: int 
                          "reason": f"{hidden} close passage(s) from documents you are not authorised to see"})
 
     # Named documents are explicit requests: being off-topic by similarity does not apply to them.
-    found = bool(named) or best >= MIN_SIMILARITY
-    return Retrieval(hits, found, round(float(best), 3), excluded,
+    found_by = ("named" if named else "similarity" if best >= MIN_SIMILARITY
+                else "keywords" if keyword_match(question, hits) else None)
+    return Retrieval(hits, found_by is not None, round(float(best), 3), found_by, excluded,
                      {"embed": round((t1 - t0) * 1000), "query": round((t2 - t1) * 1000)})
