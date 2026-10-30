@@ -20,6 +20,27 @@ const NEXT: Record<Outcome, string> = {
 // The tier, in words a reader understands without knowing the scale.
 const RISK: Record<string, string> = { T1: "Low risk", T2: "Medium risk", T3: "High risk" };
 
+// One line under the status: why the rules reached this outcome, before anyone opens a tab.
+function whyLine(run: RunDetail, passed: number, counted: number): string {
+  const code = (pattern: RegExp) => run.reasons.map((r) => r.match(pattern)?.[0]).find(Boolean);
+  if (run.outcome === "not_found") return "No passage in the documents you can see answers this";
+  if (run.outcome === "refused" && !run.checks.length) {
+    const rule = code(/^S\d+\b/);
+    return rule ? `Stopped by rule ${rule} before the AI drafted anything` : "Stopped at screening before the AI drafted anything";
+  }
+  const failed = run.checks.filter((c) => c.status === "fail" && c.severity === "hard").map((c) => c.id);
+  if (run.outcome === "refused") {
+    return failed.length ? `Failed check ${failed.join(", ")}, so nothing from the draft is shown` : "Stopped by the rules";
+  }
+  const n = run.answer?.citations?.length ?? 0;
+  const parts = [`${n} approved, in-force ${n === 1 ? "source" : "sources"}`, `${passed} of ${counted} checks passed`];
+  if (run.outcome === "released") parts.push("no QA review needed");
+  if (run.outcome === "held") parts.push(`QA review required by rule ${code(/^(R-[A-Z-]+|V\d+)/) ?? "set"}`);
+  if (run.outcome === "approved") parts.push("signed by QA");
+  if (run.outcome === "rejected") parts.push("rejected by QA");
+  return parts.join(" · ");
+}
+
 function TabHeading({ children }: { children: React.ReactNode }) {
   return <h3 className="text-base font-semibold text-strong">{children}</h3>;
 }
@@ -44,6 +65,7 @@ export function AnswerCard({ run, viewerId }: { run: RunDetail; viewerId: string
             </span>
           )}
         </p>
+        <p className="w-full text-xs opacity-90 sm:order-last">{whyLine(run, passed, counted)}</p>
         <p className="text-xs opacity-80">
           Run <Mono>#{run.seq}</Mono> · {formatTime(run.recorded_at)}{run.test && " · test run"}
         </p>
